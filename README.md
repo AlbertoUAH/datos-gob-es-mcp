@@ -59,7 +59,7 @@ pip install -e ".[dev]"
 make run-stdio
 
 # O directamente
-mcp run src/datos_gob_es_mcp/server.py
+mcp run server.py
 ```
 
 ### Inspeccionar herramientas disponibles
@@ -153,7 +153,7 @@ Añade a tu archivo de configuración `claude_desktop_config.json`:
   "mcpServers": {
     "datos-gob-es": {
       "command": "mcp",
-      "args": ["run", "/ruta/a/datos-gob-es-mcp/src/datos_gob_es_mcp/server.py"]
+      "args": ["run", "/ruta/a/datos-gob-es-mcp/server.py"]
     }
   }
 }
@@ -168,7 +168,7 @@ Añade a la configuración MCP del editor:
   "mcp.servers": {
     "datos-gob-es": {
       "command": "mcp",
-      "args": ["run", "/ruta/a/datos-gob-es-mcp/src/datos_gob_es_mcp/server.py"]
+      "args": ["run", "/ruta/a/datos-gob-es-mcp/server.py"]
     }
   }
 }
@@ -188,17 +188,13 @@ make test          # Ejecutar tests
 make lint          # Verificar código con ruff
 make format        # Formatear código con ruff
 make clean         # Limpiar archivos de caché
-make build         # Construir paquete
 ```
 
 ### Estructura del proyecto
 
 ```
 datos-gob-es-mcp/
-├── src/
-│   └── datos_gob_es_mcp/
-│       ├── __init__.py       # Exports y versión
-│       └── server.py         # Servidor MCP completo (single file)
+├── server.py                 # Servidor MCP completo
 ├── pyproject.toml            # Configuración del paquete
 ├── Makefile                  # Comandos de desarrollo
 ├── MANUAL_API_DATOS.md       # Documentación de la API
@@ -221,14 +217,11 @@ Este servidor consume la API REST de datos.gob.es, que proporciona acceso al cat
 
 ## Despliegue en FastMCP Cloud
 
-El servidor está preparado para desplegarse en FastMCP Cloud:
+El servidor está preparado para desplegarse en FastMCP Cloud. El archivo principal es `server.py` en la raíz del proyecto.
 
 ```bash
-# Construir el paquete
-make build
-
-# El entry point está configurado en pyproject.toml
-# datos-gob-es-mcp = "datos_gob_es_mcp.server:main"
+# Entry point para FastMCP Cloud
+server.py
 ```
 
 ## Licencia

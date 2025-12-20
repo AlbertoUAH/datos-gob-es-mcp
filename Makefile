@@ -14,48 +14,35 @@ venv:  ## Create virtual environment
 	$(VENV_PIP) install --upgrade pip
 
 install: venv  ## Install the package
-	$(VENV_PIP) install .
+	$(VENV_PIP) install -r requirements.txt 2>/dev/null || $(VENV_PIP) install mcp[cli] httpx pydantic
 
 dev: venv  ## Install in development mode with dev dependencies
-	$(VENV_PIP) install -e ".[dev]"
+	$(VENV_PIP) install mcp[cli] httpx pydantic ruff pytest pytest-asyncio
 
 run:  ## Run the MCP server
-	$(VENV_PYTHON) -m datos_gob_es_mcp.server
+	$(VENV_PYTHON) server.py
 
 run-stdio:  ## Run the MCP server in stdio mode (for MCP clients)
-	$(VENV_DIR)/bin/mcp run src/datos_gob_es_mcp/server.py
+	$(VENV_DIR)/bin/mcp run server.py
 
 inspect:  ## Inspect the MCP server tools (useful for debugging)
-	$(VENV_DIR)/bin/mcp dev src/datos_gob_es_mcp/server.py
+	$(VENV_DIR)/bin/mcp dev server.py
 
 test:  ## Run tests
 	$(VENV_PYTHON) -m pytest tests/ -v
 
 lint:  ## Run linter (ruff)
-	$(VENV_PYTHON) -m ruff check src/
+	$(VENV_PYTHON) -m ruff check server.py
 
 format:  ## Format code with ruff
-	$(VENV_PYTHON) -m ruff format src/
-	$(VENV_PYTHON) -m ruff check --fix src/
+	$(VENV_PYTHON) -m ruff format server.py
+	$(VENV_PYTHON) -m ruff check --fix server.py
 
 clean:  ## Clean up cache and build files
 	rm -rf build/
 	rm -rf dist/
 	rm -rf *.egg-info/
-	rm -rf src/*.egg-info/
 	rm -rf .pytest_cache/
 	rm -rf .ruff_cache/
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
-
-build:  ## Build the package
-	$(VENV_PIP) install build
-	$(VENV_PYTHON) -m build
-
-publish-test:  ## Publish to TestPyPI
-	$(VENV_PIP) install twine
-	$(VENV_PYTHON) -m twine upload --repository testpypi dist/*
-
-publish:  ## Publish to PyPI
-	$(VENV_PIP) install twine
-	$(VENV_PYTHON) -m twine upload dist/*

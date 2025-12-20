@@ -4,6 +4,9 @@ import json
 from typing import Any
 from urllib.parse import urljoin
 
+import nest_asyncio
+nest_asyncio.apply()
+
 import httpx
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field

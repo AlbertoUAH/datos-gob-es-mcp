@@ -5,8 +5,14 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from .client import DatosGobClient, DatosGobClientError
-from .models import DatasetSummary, DistributionSummary, PaginationParams
+try:
+    # When running as a package
+    from .client import DatosGobClient, DatosGobClientError
+    from .models import DatasetSummary, DistributionSummary, PaginationParams
+except ImportError:
+    # When running directly (e.g., fastmcp inspect)
+    from client import DatosGobClient, DatosGobClientError
+    from models import DatasetSummary, DistributionSummary, PaginationParams
 
 # Initialize FastMCP server
 mcp = FastMCP(

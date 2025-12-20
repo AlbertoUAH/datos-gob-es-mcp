@@ -898,10 +898,8 @@ async def get_country_spain() -> str:
         return _handle_error(e)
 
 
-def main():
-    """Entry point for the MCP server."""
-    mcp.run()
-
+# Export mcp for FastMCP Cloud
+# The 'mcp' object is the FastMCP server instance that FastMCP Cloud will use
 
 if __name__ == "__main__":
-    main()
+    mcp.run()

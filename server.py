@@ -894,6 +894,162 @@ async def get_country_spain() -> str:
         return _handle_error(e)
 
 
+# =============================================================================
+# RESOURCES - Static Catalogs (cached data for quick access)
+# =============================================================================
+
+
+@mcp.resource("catalog://themes")
+async def resource_themes() -> str:
+    """
+    Catálogo completo de temáticas/categorías disponibles en datos.gob.es.
+
+    Este recurso proporciona acceso rápido a todas las categorías temáticas
+    que se usan para clasificar los datasets del portal de datos abiertos.
+
+    Temáticas principales incluyen:
+    - economia: Datos económicos, PIB, comercio, empresas
+    - hacienda: Presupuestos, impuestos, gasto público
+    - educacion: Sistema educativo, universidades, becas
+    - salud: Sanidad, hospitales, epidemiología
+    - medio-ambiente: Calidad del aire, agua, residuos
+    - transporte: Movilidad, carreteras, transporte público
+    - turismo: Visitantes, alojamientos, destinos
+    - empleo: Mercado laboral, paro, contratación
+    - sector-publico: Administración, funcionarios
+    - ciencia-tecnologia: I+D, innovación, patentes
+    """
+    try:
+        pagination = PaginationParams(page=0, page_size=50)
+        data = await client.list_themes(pagination)
+        return _format_response(data)
+    except Exception as e:
+        return _handle_error(e)
+
+
+@mcp.resource("catalog://publishers")
+async def resource_publishers() -> str:
+    """
+    Catálogo de organismos publicadores de datos en datos.gob.es.
+
+    Este recurso lista todas las instituciones gubernamentales y organismos
+    públicos que publican datos abiertos en el portal.
+
+    Incluye organismos como:
+    - INE (Instituto Nacional de Estadística)
+    - Ministerios del Gobierno de España
+    - Comunidades Autónomas
+    - Ayuntamientos y Diputaciones
+    - Organismos autónomos y agencias estatales
+    - Universidades públicas
+
+    Cada publicador tiene un ID único que puede usarse para filtrar datasets.
+    """
+    try:
+        pagination = PaginationParams(page=0, page_size=50)
+        data = await client.list_publishers(pagination)
+        return _format_response(data)
+    except Exception as e:
+        return _handle_error(e)
+
+
+@mcp.resource("catalog://provinces")
+async def resource_provinces() -> str:
+    """
+    Catálogo de las 52 provincias españolas según la NTI.
+
+    Este recurso proporciona la lista completa de provincias de España,
+    incluyendo las 50 provincias peninsulares e insulares más Ceuta y Melilla.
+
+    Organización territorial:
+    - 50 provincias distribuidas en 17 Comunidades Autónomas
+    - 2 ciudades autónomas: Ceuta y Melilla
+
+    Cada provincia tiene un identificador que puede usarse para filtrar
+    datasets por cobertura geográfica provincial.
+
+    Ejemplos de IDs: Madrid, Barcelona, Sevilla, Valencia, Vizcaya, etc.
+    """
+    try:
+        pagination = PaginationParams(page=0, page_size=52)
+        data = await client.list_provinces(pagination)
+        return _format_response(data)
+    except Exception as e:
+        return _handle_error(e)
+
+
+@mcp.resource("catalog://autonomous-regions")
+async def resource_autonomous_regions() -> str:
+    """
+    Catálogo de las 17 Comunidades Autónomas y 2 Ciudades Autónomas de España.
+
+    Este recurso proporciona información sobre la organización territorial
+    de España a nivel autonómico según la Norma Técnica de Interoperabilidad.
+
+    Comunidades Autónomas:
+    - Andalucía, Aragón, Asturias, Baleares, Canarias
+    - Cantabria, Castilla-La Mancha, Castilla y León
+    - Cataluña, Comunidad Valenciana, Extremadura
+    - Galicia, Madrid, Murcia, Navarra, País Vasco, La Rioja
+
+    Ciudades Autónomas:
+    - Ceuta, Melilla
+
+    Ejemplos de IDs: Comunidad-Madrid, Cataluna, Andalucia, Pais-Vasco
+    """
+    try:
+        pagination = PaginationParams(page=0, page_size=20)
+        data = await client.list_autonomous_regions(pagination)
+        return _format_response(data)
+    except Exception as e:
+        return _handle_error(e)
+
+
+# =============================================================================
+# RESOURCE TEMPLATES - Dynamic Resources
+# =============================================================================
+
+
+@mcp.resource("dataset://{dataset_id}")
+async def resource_dataset(dataset_id: str) -> str:
+    """
+    Acceso directo a un dataset específico por su identificador.
+
+    Este recurso permite obtener toda la información de un dataset concreto,
+    incluyendo:
+    - Metadatos completos (título, descripción, fecha de publicación)
+    - Información del publicador
+    - Temáticas y palabras clave asociadas
+    - Lista de distribuciones (archivos descargables)
+    - URLs de acceso a los datos
+    - Frecuencia de actualización
+    - Cobertura temporal y geográfica
+
+    El dataset_id es el identificador único del dataset, que puede obtenerse
+    de las búsquedas o del URI del dataset en datos.gob.es.
+
+    Ejemplo: dataset://ea0010587-poblacion-por-sexo-municipios-y-edad
+    """
+    try:
+        data = await client.get_dataset(dataset_id)
+        return _format_response(data, "dataset")
+    except Exception as e:
+        return _handle_error(e)
+
+
+# =============================================================================
+# PROMPTS - Guided Search Workflows (loaded from prompts/ directory)
+# =============================================================================
+
+# Import and register prompts from the prompts package
+try:
+    from prompts import register_prompts
+    register_prompts(mcp)
+except ImportError:
+    # Prompts folder not available, skip registration
+    pass
+
+
 # Export mcp for FastMCP Cloud
 # The 'mcp' object is the FastMCP server instance that FastMCP Cloud will use
 

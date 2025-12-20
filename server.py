@@ -4,11 +4,8 @@ import json
 from typing import Any
 from urllib.parse import urljoin
 
-import nest_asyncio
-nest_asyncio.apply()
-
 import httpx
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
 
@@ -304,11 +301,7 @@ class DatosGobClient:
 # MCP SERVER
 # =============================================================================
 
-mcp = FastMCP(
-    name="datos-gob-es",
-    instructions="Access Spain's open data catalog from datos.gob.es. "
-    "Search and explore thousands of public datasets from Spanish government institutions.",
-)
+mcp = FastMCP("datos-gob-es")
 
 client = DatosGobClient()
 

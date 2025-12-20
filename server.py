@@ -1037,6 +1037,140 @@ async def resource_dataset(dataset_id: str) -> str:
         return _handle_error(e)
 
 
+@mcp.resource("theme://{theme_id}")
+async def resource_theme_datasets(theme_id: str) -> str:
+    """
+    Acceso directo a datasets de una temática específica.
+
+    Este recurso permite obtener todos los datasets clasificados bajo una
+    temática determinada del catálogo de datos.gob.es.
+
+    Temáticas disponibles:
+    - economia: Datos económicos, PIB, comercio exterior, empresas
+    - hacienda: Presupuestos públicos, impuestos, deuda, gasto
+    - educacion: Sistema educativo, universidades, becas, alumnado
+    - salud: Sanidad, hospitales, epidemiología, farmacia
+    - medio-ambiente: Calidad del aire, agua, residuos, biodiversidad
+    - transporte: Movilidad, carreteras, ferrocarril, aviación
+    - turismo: Visitantes, alojamientos, destinos turísticos
+    - empleo: Mercado laboral, paro, contratación, salarios
+    - sector-publico: Administración, funcionarios, organismos
+    - ciencia-tecnologia: I+D, innovación, patentes, startups
+    - cultura-ocio: Museos, bibliotecas, espectáculos
+    - urbanismo-infraestructuras: Vivienda, construcción, catastro
+    - energia: Electricidad, gas, renovables, consumo energético
+
+    Ejemplo: theme://economia
+    """
+    try:
+        pagination = PaginationParams(page=0, page_size=20)
+        data = await client.get_datasets_by_theme(theme_id, pagination)
+        return _format_response(data, "dataset")
+    except Exception as e:
+        return _handle_error(e)
+
+
+@mcp.resource("publisher://{publisher_id}")
+async def resource_publisher_datasets(publisher_id: str) -> str:
+    """
+    Acceso directo a datasets de un publicador específico.
+
+    Este recurso permite obtener todos los datasets publicados por un
+    organismo o institución determinada.
+
+    Publicadores principales:
+    - EA0010587: INE (Instituto Nacional de Estadística)
+    - E05024401: Ministerio de Hacienda
+    - E05024301: Ministerio de Economía
+    - E00003901: Agencia Estatal de Meteorología (AEMET)
+    - A08002970: Generalitat de Catalunya
+    - A01002820: Gobierno Vasco
+    - A13002908: Junta de Andalucía
+    - L01280796: Ayuntamiento de Madrid
+    - L01080193: Ajuntament de Barcelona
+
+    Para obtener la lista completa de publicadores, consulta el recurso
+    catalog://publishers.
+
+    El publisher_id corresponde al código DIR3 del organismo o su
+    identificador en el catálogo.
+
+    Ejemplo: publisher://EA0010587
+    """
+    try:
+        pagination = PaginationParams(page=0, page_size=20)
+        data = await client.get_datasets_by_publisher(publisher_id, pagination)
+        return _format_response(data, "dataset")
+    except Exception as e:
+        return _handle_error(e)
+
+
+@mcp.resource("format://{format_id}")
+async def resource_format_datasets(format_id: str) -> str:
+    """
+    Acceso directo a datasets disponibles en un formato específico.
+
+    Este recurso permite obtener datasets que tienen distribuciones
+    (archivos descargables) en el formato solicitado.
+
+    Formatos disponibles:
+    - csv: Comma-Separated Values (ideal para análisis de datos)
+    - json: JavaScript Object Notation (ideal para APIs y aplicaciones)
+    - xml: eXtensible Markup Language (interoperabilidad)
+    - xlsx: Microsoft Excel (hojas de cálculo)
+    - xls: Microsoft Excel antiguo
+    - rdf: Resource Description Framework (datos enlazados/linked data)
+    - pdf: Portable Document Format (documentos)
+    - zip: Archivos comprimidos
+    - shp: Shapefile (datos geográficos)
+    - geojson: GeoJSON (datos geográficos)
+    - kml: Keyhole Markup Language (Google Earth)
+    - html: Páginas web
+    - api: Acceso mediante API
+
+    Ejemplo: format://csv
+    """
+    try:
+        pagination = PaginationParams(page=0, page_size=20)
+        data = await client.get_datasets_by_format(format_id, pagination)
+        return _format_response(data, "dataset")
+    except Exception as e:
+        return _handle_error(e)
+
+
+@mcp.resource("keyword://{keyword}")
+async def resource_keyword_datasets(keyword: str) -> str:
+    """
+    Acceso directo a datasets etiquetados con una palabra clave específica.
+
+    Este recurso permite obtener datasets que han sido etiquetados con
+    un keyword o tag determinado. Los keywords son más específicos que
+    las temáticas y permiten búsquedas más precisas.
+
+    Keywords populares:
+    - presupuesto, gastos, ingresos (finanzas públicas)
+    - poblacion, censo, demografia (estadísticas poblacionales)
+    - empleo, paro, contratacion (mercado laboral)
+    - covid, pandemia, salud (sanidad)
+    - clima, temperatura, precipitacion (meteorología)
+    - transporte, trafico, movilidad (transporte)
+    - educacion, universidad, alumnos (educación)
+    - turismo, viajeros, hoteles (turismo)
+    - energia, electricidad, consumo (energía)
+    - medioambiente, contaminacion, residuos (medio ambiente)
+
+    Los keywords pueden estar en español o inglés según el dataset.
+
+    Ejemplo: keyword://presupuesto
+    """
+    try:
+        pagination = PaginationParams(page=0, page_size=20)
+        data = await client.get_datasets_by_keyword(keyword, pagination)
+        return _format_response(data, "dataset")
+    except Exception as e:
+        return _handle_error(e)
+
+
 # =============================================================================
 # PROMPTS - Guided Search Workflows (loaded from prompts/ directory)
 # =============================================================================

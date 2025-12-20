@@ -12,7 +12,9 @@ Este servidor MCP permite a asistentes de IA como Claude, ChatGPT y otros client
 
 ### Características
 
-- 22 herramientas MCP para consultar la API de datos.gob.es
+- **22 herramientas MCP** para consultar la API de datos.gob.es
+- **13 recursos MCP** (9 estáticos + 4 templates dinámicos) para acceso directo a datos
+- **4 prompts MCP** para guías de búsqueda detalladas
 - Búsqueda de datasets por título, temática, publicador, formato, keywords y más
 - Acceso a distribuciones (archivos descargables) de los datasets
 - Consulta de metadatos: publicadores, temáticas, cobertura geográfica
@@ -68,7 +70,21 @@ mcp run server.py
 make inspect
 ```
 
-## Herramientas Disponibles
+## Capacidades MCP
+
+Este servidor implementa las tres capacidades principales del Model Context Protocol:
+
+| Capacidad | Cantidad | Descripción |
+|-----------|----------|-------------|
+| **Tools** | 22 | Funciones que el LLM puede invocar |
+| **Resources** | 13 | Datos estáticos y dinámicos accesibles |
+| **Prompts** | 4 | Guías de búsqueda predefinidas |
+
+---
+
+## Tools (Herramientas)
+
+Las herramientas permiten al asistente de IA realizar operaciones activas sobre la API.
 
 ### Datasets (9 herramientas)
 
@@ -112,6 +128,93 @@ make inspect
 | `get_autonomous_region` | Obtener una Comunidad Autónoma por ID |
 | `get_country_spain` | Obtener información de España |
 
+---
+
+## Resources (Recursos)
+
+Los recursos proporcionan acceso directo a datos sin necesidad de invocar herramientas.
+
+### Recursos Estáticos (9)
+
+| URI | Descripción |
+|-----|-------------|
+| `catalog://overview` | Resumen general del catálogo con estadísticas |
+| `catalog://themes` | Lista de todas las temáticas disponibles |
+| `catalog://publishers` | Lista de todos los organismos publicadores |
+| `catalog://formats` | Formatos de datos disponibles (CSV, JSON, XML, etc.) |
+| `catalog://spatial` | Opciones de cobertura geográfica |
+| `catalog://provinces` | Lista de provincias españolas |
+| `catalog://autonomous-regions` | Lista de Comunidades Autónomas |
+| `catalog://public-sectors` | Sectores públicos según NTI |
+| `catalog://keywords` | Palabras clave más utilizadas |
+
+### Resource Templates Dinámicos (4)
+
+| URI Template | Descripción | Ejemplo |
+|--------------|-------------|---------|
+| `dataset://{dataset_id}` | Información completa de un dataset | `dataset://l01280066-presupuestos-2024` |
+| `theme://{theme_id}` | Datasets de una temática específica | `theme://economia` |
+| `publisher://{publisher_id}` | Datasets de un publicador específico | `publisher://E00003901` |
+| `format://{format_id}` | Datasets en un formato específico | `format://csv` |
+| `keyword://{keyword}` | Datasets con una palabra clave | `keyword://presupuestos` |
+
+### Uso de Resources
+
+Los resources se pueden usar directamente en conversaciones:
+
+```
+Usuario: Dame información sobre el catálogo
+Asistente: [Lee catalog://overview]
+
+Usuario: ¿Qué datasets hay sobre economía?
+Asistente: [Lee theme://economia]
+
+Usuario: Muéstrame el dataset l01280066-presupuestos
+Asistente: [Lee dataset://l01280066-presupuestos]
+```
+
+---
+
+## Prompts (Guías de Búsqueda)
+
+Los prompts proporcionan guías detalladas para tareas complejas de búsqueda y análisis.
+
+### Prompts Disponibles (4)
+
+| Prompt | Parámetros | Descripción |
+|--------|------------|-------------|
+| `prompt_buscar_datos_por_tema` | tema, formato, max_resultados | Guía para encontrar datasets de una temática en un formato específico |
+| `prompt_datasets_recientes` | dias, tema, max_resultados | Guía para encontrar datasets actualizados recientemente |
+| `prompt_explorar_catalogo` | interes | Guía completa de exploración del catálogo |
+| `prompt_analisis_dataset` | dataset_id, incluir_distribuciones, evaluar_calidad | Guía para análisis detallado de un dataset |
+
+### Ejemplo: Buscar datos por tema
+
+```
+Prompt: prompt_buscar_datos_por_tema(tema="salud", formato="csv", max_resultados=10)
+
+El prompt guiará al asistente para:
+1. Verificar la temática en catalog://themes
+2. Buscar datasets con get_datasets_by_theme
+3. Filtrar por formato CSV
+4. Obtener detalles de los datasets más relevantes
+```
+
+### Ejemplo: Analizar un dataset
+
+```
+Prompt: prompt_analisis_dataset(dataset_id="l01280066-presupuestos", evaluar_calidad=true)
+
+El prompt guiará al asistente para:
+1. Obtener metadatos completos del dataset
+2. Analizar las distribuciones disponibles
+3. Evaluar la calidad de los datos
+4. Identificar posibles casos de uso
+5. Sugerir datasets complementarios
+```
+
+---
+
 ## Ejemplos de Uso
 
 ### Buscar datasets sobre empleo
@@ -125,7 +228,7 @@ Asistente: [Usa search_datasets_by_title("empleo")]
 
 ```
 Usuario: ¿Qué datos hay disponibles sobre economía?
-Asistente: [Usa get_datasets_by_theme("economia")]
+Asistente: [Lee theme://economia o usa get_datasets_by_theme("economia")]
 ```
 
 ### Obtener archivos de un dataset
@@ -135,11 +238,18 @@ Usuario: Dame los archivos descargables del dataset de presupuestos
 Asistente: [Usa get_distributions_by_dataset("id-del-dataset")]
 ```
 
-### Listar datasets en formato CSV
+### Exploración guiada
 
 ```
-Usuario: Quiero ver qué datasets tienen datos en CSV
-Asistente: [Usa get_datasets_by_format("csv")]
+Usuario: Quiero explorar datos sobre turismo en España
+Asistente: [Usa prompt_explorar_catalogo(interes="turismo en España")]
+```
+
+### Análisis de dataset
+
+```
+Usuario: Analiza el dataset l01280066-presupuestos-2024
+Asistente: [Usa prompt_analisis_dataset(dataset_id="l01280066-presupuestos-2024")]
 ```
 
 ## Configuración en Clientes MCP
@@ -194,7 +304,13 @@ make clean         # Limpiar archivos de caché
 
 ```
 datos-gob-es-mcp/
-├── server.py                 # Servidor MCP completo
+├── server.py                 # Servidor MCP (tools + resources)
+├── prompts/                  # Guías de búsqueda MCP
+│   ├── __init__.py          # Registro de prompts
+│   ├── buscar_por_tema.py   # Búsqueda por temática y formato
+│   ├── datasets_recientes.py # Datasets actualizados recientemente
+│   ├── explorar_catalogo.py # Exploración guiada del catálogo
+│   └── analisis_dataset.py  # Análisis detallado de datasets
 ├── requirements.txt          # Dependencias Python
 ├── Makefile                  # Comandos de desarrollo
 ├── MANUAL_API_DATOS.md       # Documentación de la API

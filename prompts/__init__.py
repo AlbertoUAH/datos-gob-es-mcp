@@ -1,6 +1,6 @@
 """MCP Prompts para datos.gob.es - Guías de búsqueda detalladas."""
 
-from . import buscar_por_tema, datasets_recientes, explorar_catalogo
+from . import buscar_por_tema, datasets_recientes, explorar_catalogo, analisis_dataset
 
 
 def register_prompts(mcp):
@@ -63,6 +63,28 @@ def register_prompts(mcp):
             interes: Descripción del área de interés para la búsqueda
         """
         return explorar_catalogo.generate_prompt(interes)
+
+    @mcp.prompt()
+    def prompt_analisis_dataset(
+        dataset_id: str = "",
+        incluir_distribuciones: bool = True,
+        evaluar_calidad: bool = True
+    ) -> str:
+        """
+        Análisis detallado de un dataset específico.
+
+        Este prompt te guía para realizar un análisis exhaustivo de un dataset
+        concreto del catálogo datos.gob.es, incluyendo metadatos, distribuciones,
+        calidad de datos y posibles usos.
+
+        Args:
+            dataset_id: Identificador del dataset a analizar
+            incluir_distribuciones: Si incluir análisis de distribuciones
+            evaluar_calidad: Si incluir evaluación de calidad de datos
+        """
+        return analisis_dataset.generate_prompt(
+            dataset_id, incluir_distribuciones, evaluar_calidad
+        )
 
 
 __all__ = ["register_prompts"]

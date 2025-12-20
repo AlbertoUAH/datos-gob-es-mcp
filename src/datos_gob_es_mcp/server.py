@@ -1,9 +1,16 @@
 """MCP server for datos.gob.es open data catalog API."""
 
 import json
+import sys
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+
+# Add package directory to path for direct execution (e.g., fastmcp inspect)
+_package_dir = Path(__file__).parent
+if str(_package_dir) not in sys.path:
+    sys.path.insert(0, str(_package_dir))
 
 try:
     # When running as a package

@@ -1,11 +1,21 @@
 """HTTP client for datos.gob.es API."""
 
+import sys
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
 import httpx
 
-from .models import PaginationParams
+# Add package directory to path for direct execution
+_package_dir = Path(__file__).parent
+if str(_package_dir) not in sys.path:
+    sys.path.insert(0, str(_package_dir))
+
+try:
+    from .models import PaginationParams
+except ImportError:
+    from models import PaginationParams
 
 
 class DatosGobClientError(Exception):

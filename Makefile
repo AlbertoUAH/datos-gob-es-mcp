@@ -13,8 +13,8 @@ venv:  ## Create virtual environment
 	$(PYTHON) -m venv $(VENV_DIR)
 	$(VENV_PIP) install --upgrade pip
 
-install: venv  ## Install the package
-	$(VENV_PIP) install -r requirements.txt 2>/dev/null || $(VENV_PIP) install mcp[cli] httpx pydantic
+install: venv  ## Install dependencies
+	$(VENV_PIP) install -r requirements.txt
 
 dev: venv  ## Install in development mode with dev dependencies
 	$(VENV_PIP) install mcp[cli] httpx pydantic ruff pytest pytest-asyncio

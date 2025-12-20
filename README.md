@@ -46,8 +46,8 @@ make dev
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Instalar en modo desarrollo
-pip install -e ".[dev]"
+# Instalar dependencias
+pip install -r requirements.txt
 ```
 
 ## Uso
@@ -195,7 +195,7 @@ make clean         # Limpiar archivos de caché
 ```
 datos-gob-es-mcp/
 ├── server.py                 # Servidor MCP completo
-├── pyproject.toml            # Configuración del paquete
+├── requirements.txt          # Dependencias Python
 ├── Makefile                  # Comandos de desarrollo
 ├── MANUAL_API_DATOS.md       # Documentación de la API
 └── README.md

@@ -971,7 +971,7 @@ async def resource_provinces() -> str:
     Ejemplos de IDs: Madrid, Barcelona, Sevilla, Valencia, Vizcaya, etc.
     """
     try:
-        pagination = PaginationParams(page=0, page_size=52)
+        pagination = PaginationParams(page=0, page_size=50)
         data = await client.list_provinces(pagination)
         return _format_response(data)
     except Exception as e:

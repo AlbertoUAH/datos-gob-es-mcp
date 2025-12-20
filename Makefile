@@ -1,4 +1,4 @@
-.PHONY: install dev run test lint format clean help inspect venv
+.PHONY: install dev run test test-cov lint format clean help inspect venv
 
 # Default Python interpreter
 PYTHON ?= python3
@@ -17,7 +17,7 @@ install: venv  ## Install dependencies
 	$(VENV_PIP) install -r requirements.txt
 
 dev: venv  ## Install in development mode with dev dependencies
-	$(VENV_PIP) install mcp[cli] httpx pydantic ruff pytest pytest-asyncio
+	$(VENV_PIP) install -r requirements-dev.txt
 
 run:  ## Run the MCP server
 	$(VENV_PYTHON) server.py
@@ -31,12 +31,15 @@ inspect:  ## Inspect the MCP server tools (useful for debugging)
 test:  ## Run tests
 	$(VENV_PYTHON) -m pytest tests/ -v
 
+test-cov:  ## Run tests with coverage report
+	$(VENV_PYTHON) -m pytest tests/ -v --cov=. --cov-report=term-missing --cov-report=html
+
 lint:  ## Run linter (ruff)
-	$(VENV_PYTHON) -m ruff check server.py
+	$(VENV_PYTHON) -m ruff check server.py prompts/ tests/
 
 format:  ## Format code with ruff
-	$(VENV_PYTHON) -m ruff format server.py
-	$(VENV_PYTHON) -m ruff check --fix server.py
+	$(VENV_PYTHON) -m ruff format server.py prompts/ tests/
+	$(VENV_PYTHON) -m ruff check --fix server.py prompts/ tests/
 
 clean:  ## Clean up cache and build files
 	rm -rf build/
@@ -44,5 +47,12 @@ clean:  ## Clean up cache and build files
 	rm -rf *.egg-info/
 	rm -rf .pytest_cache/
 	rm -rf .ruff_cache/
+	rm -rf .coverage
+	rm -rf htmlcov/
+	rm -rf coverage.xml
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
+
+ci:  ## Run full CI pipeline (lint + test)
+	$(MAKE) lint
+	$(MAKE) test

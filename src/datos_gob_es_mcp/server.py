@@ -1,47 +1,317 @@
 """MCP server for datos.gob.es open data catalog API."""
 
 import json
-import sys
-from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
+import httpx
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel, Field
 
-# Add package directory to path for direct execution (e.g., fastmcp inspect)
-_package_dir = Path(__file__).parent
-if str(_package_dir) not in sys.path:
-    sys.path.insert(0, str(_package_dir))
 
-try:
-    # When running as a package
-    from .client import DatosGobClient, DatosGobClientError
-    from .models import DatasetSummary, DistributionSummary, PaginationParams
-except ImportError:
-    # When running directly (e.g., fastmcp inspect)
-    from client import DatosGobClient, DatosGobClientError
-    from models import DatasetSummary, DistributionSummary, PaginationParams
+# =============================================================================
+# MODELS
+# =============================================================================
 
-# Initialize FastMCP server
+
+class PaginationParams(BaseModel):
+    """Parameters for paginated API requests."""
+
+    page: int = Field(default=0, ge=0, description="Page number (0-indexed)")
+    page_size: int = Field(default=10, ge=1, le=50, description="Items per page (max 50)")
+    sort: str | None = Field(
+        default=None, description="Sort field(s), prefix with - for descending"
+    )
+
+
+class DatasetSummary(BaseModel):
+    """Simplified dataset representation for responses."""
+
+    uri: str
+    title: str | list[str] | None = None
+    description: str | list[str] | None = None
+    publisher: str | dict[str, Any] | None = None
+    theme: list[str] | str | None = None
+    keywords: list[str] | None = None
+    issued: str | None = None
+    modified: str | None = None
+    distributions_count: int = 0
+
+    @classmethod
+    def from_api_item(cls, item: dict[str, Any]) -> "DatasetSummary":
+        """Create a DatasetSummary from an API response item."""
+        title = cls._extract_text(item.get("title"))
+        description = cls._extract_text(item.get("description"))
+
+        distributions = item.get("distribution", [])
+        if isinstance(distributions, dict):
+            distributions = [distributions]
+
+        theme = item.get("theme")
+        if isinstance(theme, str):
+            theme = [theme]
+        elif isinstance(theme, list):
+            theme = [t if isinstance(t, str) else str(t) for t in theme]
+
+        keywords = cls._extract_keywords(item.get("keyword", []))
+
+        return cls(
+            uri=item.get("_about", ""),
+            title=title,
+            description=description,
+            publisher=item.get("publisher"),
+            theme=theme,
+            keywords=keywords,
+            issued=item.get("issued"),
+            modified=item.get("modified"),
+            distributions_count=len(distributions) if distributions else 0,
+        )
+
+    @staticmethod
+    def _extract_keywords(value: Any) -> list[str] | None:
+        """Extract keywords handling multilingual format."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list):
+            keywords = []
+            for item in value:
+                if isinstance(item, str):
+                    keywords.append(item)
+                elif isinstance(item, dict):
+                    keywords.append(item.get("_value", str(item)))
+            return keywords if keywords else None
+        return None
+
+    @staticmethod
+    def _extract_text(value: Any) -> str | list[str] | None:
+        """Extract text from multilingual field."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            return value.get("_value", str(value))
+        if isinstance(value, list):
+            texts = []
+            for item in value:
+                if isinstance(item, str):
+                    texts.append(item)
+                elif isinstance(item, dict):
+                    texts.append(item.get("_value", str(item)))
+            return texts if len(texts) > 1 else (texts[0] if texts else None)
+        return str(value)
+
+
+class DistributionSummary(BaseModel):
+    """Simplified distribution representation."""
+
+    uri: str
+    title: str | None = None
+    access_url: str | None = None
+    format: str | None = None
+    media_type: str | None = None
+
+    @classmethod
+    def from_api_item(cls, item: dict[str, Any]) -> "DistributionSummary":
+        """Create a DistributionSummary from an API response item."""
+        title = item.get("title")
+        if isinstance(title, dict):
+            title = title.get("_value")
+        elif isinstance(title, list) and title:
+            title = title[0].get("_value") if isinstance(title[0], dict) else title[0]
+
+        return cls(
+            uri=item.get("_about", ""),
+            title=title,
+            access_url=item.get("accessURL"),
+            format=item.get("format"),
+            media_type=item.get("mediaType"),
+        )
+
+
+# =============================================================================
+# HTTP CLIENT
+# =============================================================================
+
+
+class DatosGobClientError(Exception):
+    """Exception raised for API client errors."""
+
+    def __init__(self, message: str, status_code: int | None = None):
+        self.message = message
+        self.status_code = status_code
+        super().__init__(self.message)
+
+
+class DatosGobClient:
+    """Async HTTP client for the datos.gob.es API."""
+
+    BASE_URL = "https://datos.gob.es/apidata/"
+    DEFAULT_TIMEOUT = 30.0
+
+    def __init__(self, timeout: float = DEFAULT_TIMEOUT):
+        self.timeout = timeout
+
+    def _build_params(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+        """Build query parameters from pagination settings."""
+        params: dict[str, Any] = {}
+        if pagination:
+            params["_page"] = pagination.page
+            params["_pageSize"] = pagination.page_size
+            if pagination.sort:
+                params["_sort"] = pagination.sort
+        return params
+
+    async def _request(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Make an async HTTP request to the API."""
+        url = urljoin(self.BASE_URL, endpoint)
+        if not url.endswith(".json"):
+            url = f"{url}.json"
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                return response.json()
+            except httpx.TimeoutException as e:
+                raise DatosGobClientError(f"Request timed out: {e}") from e
+            except httpx.HTTPStatusError as e:
+                raise DatosGobClientError(
+                    f"HTTP error {e.response.status_code}: {e.response.text}",
+                    status_code=e.response.status_code,
+                ) from e
+            except httpx.RequestError as e:
+                raise DatosGobClientError(f"Request failed: {e}") from e
+
+    async def list_datasets(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request("catalog/dataset", params)
+
+    async def get_dataset(self, dataset_id: str) -> dict[str, Any]:
+        return await self._request(f"catalog/dataset/{dataset_id}")
+
+    async def search_datasets_by_title(
+        self, title: str, pagination: PaginationParams | None = None
+    ) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request(f"catalog/dataset/title/{title}", params)
+
+    async def get_datasets_by_publisher(
+        self, publisher_id: str, pagination: PaginationParams | None = None
+    ) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request(f"catalog/dataset/publisher/{publisher_id}", params)
+
+    async def get_datasets_by_theme(
+        self, theme_id: str, pagination: PaginationParams | None = None
+    ) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request(f"catalog/dataset/theme/{theme_id}", params)
+
+    async def get_datasets_by_format(
+        self, format_id: str, pagination: PaginationParams | None = None
+    ) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request(f"catalog/dataset/format/{format_id}", params)
+
+    async def get_datasets_by_keyword(
+        self, keyword: str, pagination: PaginationParams | None = None
+    ) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request(f"catalog/dataset/keyword/{keyword}", params)
+
+    async def get_datasets_by_spatial(
+        self,
+        spatial_word1: str,
+        spatial_word2: str,
+        pagination: PaginationParams | None = None,
+    ) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request(
+            f"catalog/dataset/spatial/{spatial_word1}/{spatial_word2}", params
+        )
+
+    async def get_datasets_by_date_range(
+        self,
+        begin_date: str,
+        end_date: str,
+        pagination: PaginationParams | None = None,
+    ) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request(
+            f"catalog/dataset/modified/begin/{begin_date}/end/{end_date}", params
+        )
+
+    async def list_distributions(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request("catalog/distribution", params)
+
+    async def get_distributions_by_dataset(
+        self, dataset_id: str, pagination: PaginationParams | None = None
+    ) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request(f"catalog/distribution/dataset/{dataset_id}", params)
+
+    async def get_distributions_by_format(
+        self, format_id: str, pagination: PaginationParams | None = None
+    ) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request(f"catalog/distribution/format/{format_id}", params)
+
+    async def list_publishers(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request("catalog/publisher", params)
+
+    async def list_spatial_coverage(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request("catalog/spatial", params)
+
+    async def list_themes(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request("catalog/theme", params)
+
+    async def list_public_sectors(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request("nti/public-sector", params)
+
+    async def get_public_sector(self, sector_id: str) -> dict[str, Any]:
+        return await self._request(f"nti/public-sector/{sector_id}")
+
+    async def list_provinces(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request("nti/territory/Province", params)
+
+    async def get_province(self, province_id: str) -> dict[str, Any]:
+        return await self._request(f"nti/territory/Province/{province_id}")
+
+    async def list_autonomous_regions(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+        params = self._build_params(pagination)
+        return await self._request("nti/territory/Autonomous-region", params)
+
+    async def get_autonomous_region(self, region_id: str) -> dict[str, Any]:
+        return await self._request(f"nti/territory/Autonomous-region/{region_id}")
+
+    async def get_country_spain(self) -> dict[str, Any]:
+        return await self._request("nti/territory/Country/España")
+
+
+# =============================================================================
+# MCP SERVER
+# =============================================================================
+
 mcp = FastMCP(
     name="datos-gob-es",
     instructions="Access Spain's open data catalog from datos.gob.es. "
     "Search and explore thousands of public datasets from Spanish government institutions.",
 )
 
-# Shared client instance
 client = DatosGobClient()
 
 
 def _format_response(data: dict[str, Any], summary_type: str | None = None) -> str:
-    """Format API response for readable output.
-
-    Args:
-        data: Raw API response.
-        summary_type: Type of summary to generate ('dataset', 'distribution', or None).
-
-    Returns:
-        Formatted JSON string.
-    """
+    """Format API response for readable output."""
     result = data.get("result", {})
     items = result.get("items", [])
 

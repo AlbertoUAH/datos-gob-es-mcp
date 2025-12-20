@@ -198,9 +198,7 @@ datos-gob-es-mcp/
 ├── src/
 │   └── datos_gob_es_mcp/
 │       ├── __init__.py       # Exports y versión
-│       ├── server.py         # Servidor MCP con 22 herramientas
-│       ├── client.py         # Cliente HTTP async para la API
-│       └── models.py         # Modelos Pydantic
+│       └── server.py         # Servidor MCP completo (single file)
 ├── pyproject.toml            # Configuración del paquete
 ├── Makefile                  # Comandos de desarrollo
 ├── MANUAL_API_DATOS.md       # Documentación de la API

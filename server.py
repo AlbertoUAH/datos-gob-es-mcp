@@ -1,5 +1,7 @@
 """MCP server for datos.gob.es open data catalog API."""
 
+import csv
+import io
 import json
 from typing import Any
 from urllib.parse import urljoin
@@ -104,6 +106,17 @@ class DatasetSummary(BaseModel):
         return str(value)
 
 
+class DataPreview(BaseModel):
+    """Preview of actual data content from a distribution."""
+
+    columns: list[str]
+    rows: list[list[Any]]
+    total_rows: int | None = None
+    format: str
+    truncated: bool = False
+    error: str | None = None
+
+
 class DistributionSummary(BaseModel):
     """Simplified distribution representation."""
 
@@ -112,6 +125,7 @@ class DistributionSummary(BaseModel):
     access_url: str | None = None
     format: str | None = None
     media_type: str | None = None
+    preview: DataPreview | None = None
 
     @classmethod
     def from_api_item(cls, item: dict[str, Any]) -> "DistributionSummary":
@@ -122,12 +136,25 @@ class DistributionSummary(BaseModel):
         elif isinstance(title, list) and title:
             title = title[0].get("_value") if isinstance(title[0], dict) else title[0]
 
+        # Handle format field that can be string or dict
+        format_val = item.get("format")
+        if isinstance(format_val, dict):
+            format_val = format_val.get("value") or format_val.get("_value")
+        elif isinstance(format_val, list) and format_val:
+            fmt = format_val[0]
+            format_val = fmt.get("value") if isinstance(fmt, dict) else fmt
+
+        # Handle mediaType field that can be string or dict
+        media_type = item.get("mediaType")
+        if isinstance(media_type, dict):
+            media_type = media_type.get("value") or media_type.get("_value")
+
         return cls(
             uri=item.get("_about", ""),
             title=title,
             access_url=item.get("accessURL"),
-            format=item.get("format"),
-            media_type=item.get("mediaType"),
+            format=format_val,
+            media_type=media_type,
         )
 
 
@@ -336,6 +363,233 @@ def _handle_error(e: Exception) -> str:
     if isinstance(e, DatosGobClientError):
         return json.dumps({"error": e.message, "status_code": e.status_code}, ensure_ascii=False)
     return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+# Maximum bytes to download for preview
+PREVIEW_MAX_BYTES = 100 * 1024  # 100KB
+PREVIEW_TIMEOUT = 10.0  # 10 seconds
+
+
+def _normalize_format(format_str: str | None, media_type: str | None) -> str | None:
+    """Normalize format string to a standard format identifier."""
+    if format_str:
+        fmt_lower = format_str.lower()
+        if "csv" in fmt_lower or fmt_lower == "text/csv":
+            return "csv"
+        if "json" in fmt_lower or fmt_lower == "application/json":
+            return "json"
+    if media_type:
+        mt_lower = media_type.lower()
+        if "csv" in mt_lower:
+            return "csv"
+        if "json" in mt_lower:
+            return "json"
+    return None
+
+
+def _detect_csv_delimiter(content: str) -> str:
+    """Detect the delimiter used in a CSV file."""
+    # Check first few lines for common delimiters
+    first_lines = content.split("\n")[:5]
+    sample = "\n".join(first_lines)
+
+    # Count occurrences of common delimiters
+    delimiters = [",", ";", "\t", "|"]
+    counts = {d: sample.count(d) for d in delimiters}
+
+    # Return the most common delimiter (with at least 1 occurrence)
+    best = max(counts, key=counts.get)
+    return best if counts[best] > 0 else ","
+
+
+def _parse_csv_preview(content: str, max_rows: int) -> DataPreview:
+    """Parse CSV content and return a preview."""
+    try:
+        delimiter = _detect_csv_delimiter(content)
+        reader = csv.reader(io.StringIO(content), delimiter=delimiter)
+        rows_list = list(reader)
+
+        if not rows_list:
+            return DataPreview(
+                columns=[],
+                rows=[],
+                total_rows=0,
+                format="csv",
+                truncated=False,
+            )
+
+        columns = rows_list[0] if rows_list else []
+        data_rows = rows_list[1 : max_rows + 1]
+        total_rows = len(rows_list) - 1  # Exclude header
+
+        return DataPreview(
+            columns=columns,
+            rows=data_rows,
+            total_rows=total_rows,
+            format="csv",
+            truncated=len(rows_list) - 1 > max_rows,
+        )
+    except csv.Error as e:
+        return DataPreview(
+            columns=[],
+            rows=[],
+            format="csv",
+            error=f"CSV parsing error: {e}",
+        )
+
+
+def _parse_json_preview(content: str, max_rows: int) -> DataPreview:
+    """Parse JSON content and return a preview."""
+    try:
+        data = json.loads(content)
+
+        # Handle different JSON structures
+        items: list[dict[str, Any]] = []
+
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            # Try common patterns: data, items, results, records
+            for key in ["data", "items", "results", "records", "rows"]:
+                if key in data and isinstance(data[key], list):
+                    items = data[key]
+                    break
+            # If no list found, treat the dict itself as a single item
+            if not items and data:
+                items = [data]
+
+        if not items:
+            return DataPreview(
+                columns=[],
+                rows=[],
+                total_rows=0,
+                format="json",
+                truncated=False,
+            )
+
+        # Extract columns from first item
+        first_item = items[0] if items else {}
+        columns = list(first_item.keys()) if isinstance(first_item, dict) else []
+
+        # Extract rows
+        data_rows: list[list[Any]] = []
+        for item in items[:max_rows]:
+            if isinstance(item, dict):
+                row = [item.get(col) for col in columns]
+            else:
+                row = [item]
+            data_rows.append(row)
+
+        return DataPreview(
+            columns=columns,
+            rows=data_rows,
+            total_rows=len(items),
+            format="json",
+            truncated=len(items) > max_rows,
+        )
+    except json.JSONDecodeError as e:
+        return DataPreview(
+            columns=[],
+            rows=[],
+            format="json",
+            error=f"JSON parsing error: {e}",
+        )
+
+
+async def _fetch_data_preview(
+    access_url: str,
+    format_str: str | None,
+    media_type: str | None,
+    max_rows: int = 10,
+) -> DataPreview | None:
+    """Fetch and parse data preview from a distribution URL."""
+    normalized_format = _normalize_format(format_str, media_type)
+
+    if normalized_format not in ("csv", "json"):
+        return None  # Unsupported format
+
+    try:
+        async with httpx.AsyncClient(timeout=PREVIEW_TIMEOUT) as http_client:
+            async with http_client.stream("GET", access_url) as response:
+                response.raise_for_status()
+
+                # Read up to PREVIEW_MAX_BYTES
+                chunks = []
+                bytes_read = 0
+                async for chunk in response.aiter_bytes():
+                    chunks.append(chunk)
+                    bytes_read += len(chunk)
+                    if bytes_read >= PREVIEW_MAX_BYTES:
+                        break
+
+                content_bytes = b"".join(chunks)
+
+                # Try to decode as UTF-8, fallback to latin-1
+                try:
+                    content = content_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    content = content_bytes.decode("latin-1", errors="replace")
+
+        if normalized_format == "csv":
+            return _parse_csv_preview(content, max_rows)
+        elif normalized_format == "json":
+            return _parse_json_preview(content, max_rows)
+
+    except httpx.TimeoutException:
+        return DataPreview(
+            columns=[],
+            rows=[],
+            format=normalized_format or "unknown",
+            error="Timeout fetching data preview",
+        )
+    except httpx.HTTPStatusError as e:
+        return DataPreview(
+            columns=[],
+            rows=[],
+            format=normalized_format or "unknown",
+            error=f"HTTP error {e.response.status_code}",
+        )
+    except Exception as e:
+        return DataPreview(
+            columns=[],
+            rows=[],
+            format=normalized_format or "unknown",
+            error=f"Error fetching preview: {str(e)}",
+        )
+
+    return None
+
+
+async def _format_response_with_preview(data: dict[str, Any], preview_rows: int) -> str:
+    """Format API response with data previews for distributions."""
+    result = data.get("result", {})
+    items = result.get("items", [])
+
+    output: dict[str, Any] = {
+        "total_in_page": len(items),
+        "page": result.get("page", 0),
+        "items_per_page": result.get("itemsPerPage", 10),
+    }
+
+    distributions = []
+    for item in items:
+        dist = DistributionSummary.from_api_item(item)
+
+        # Try to fetch preview for supported formats
+        if dist.access_url:
+            preview = await _fetch_data_preview(
+                dist.access_url,
+                dist.format,
+                dist.media_type,
+                preview_rows,
+            )
+            if preview:
+                dist.preview = preview
+
+        distributions.append(dist.model_dump(exclude_none=True))
+
+    output["distributions"] = distributions
+    return json.dumps(output, ensure_ascii=False, indent=2)
 
 
 # =============================================================================
@@ -619,6 +873,8 @@ async def get_distributions_by_dataset(
     dataset_id: str,
     page: int = 0,
     page_size: int = 10,
+    include_preview: bool = False,
+    preview_rows: int = 10,
 ) -> str:
     """Get all downloadable files for a specific dataset.
 
@@ -629,13 +885,21 @@ async def get_distributions_by_dataset(
         dataset_id: Dataset identifier.
         page: Page number (starting from 0).
         page_size: Number of results per page (max 50).
+        include_preview: If True, fetch and include a data preview for CSV/JSON files.
+        preview_rows: Number of rows to include in preview (default 10, max 50).
 
     Returns:
-        JSON with distributions for the dataset.
+        JSON with distributions for the dataset. If include_preview=True,
+        each distribution will include column names and sample rows.
     """
     try:
         pagination = PaginationParams(page=page, page_size=page_size)
         data = await client.get_distributions_by_dataset(dataset_id, pagination)
+
+        if include_preview:
+            preview_rows = min(max(1, preview_rows), 50)  # Clamp to 1-50
+            return await _format_response_with_preview(data, preview_rows)
+
         return _format_response(data, "distribution")
     except Exception as e:
         return _handle_error(e)

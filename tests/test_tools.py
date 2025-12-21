@@ -53,7 +53,7 @@ class TestDatasetTools:
     async def test_list_datasets_with_pagination(self, mock_api):
         """Test list_datasets with custom pagination."""
         fn = get_tool_fn(list_datasets)
-        result = await fn(page=1, page_size=25, sort="-issued")
+        result = await fn(page=1, sort="-issued")
         data = json.loads(result)
 
         assert "datasets" in data

@@ -409,6 +409,9 @@ def _filter_items_by_exact_match(
     return filtered
 
 
+# Fixed page size for all queries (API maximum)
+DEFAULT_PAGE_SIZE = 200
+
 # Maximum bytes to download for preview
 PREVIEW_MAX_BYTES = 100 * 1024  # 100KB
 PREVIEW_TIMEOUT = 10.0  # 10 seconds
@@ -644,7 +647,6 @@ async def _format_response_with_preview(data: dict[str, Any], preview_rows: int)
 @mcp.tool()
 async def list_datasets(
     page: int = 0,
-    page_size: int = 200,
     sort: str | None = "-modified",
 ) -> str:
     """List datasets from the Spanish open data catalog.
@@ -654,14 +656,13 @@ async def list_datasets(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
         sort: Sort field. Use '-' prefix for descending. Examples: '-modified', 'title', '-issued'.
 
     Returns:
         JSON with datasets including title, description, publisher, and available formats.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size, sort=sort)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
         data = await client.list_datasets(pagination)
         return _format_response(data, "dataset")
     except Exception as e:
@@ -692,7 +693,6 @@ async def get_dataset(dataset_id: str) -> str:
 async def search_datasets_by_title(
     title: str,
     page: int = 0,
-    page_size: int = 200,
     exact_match: bool = False,
 ) -> str:
     """Search datasets by title text.
@@ -703,7 +703,6 @@ async def search_datasets_by_title(
     Args:
         title: Text to search in dataset titles (partial match supported).
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
         exact_match: If True, only return datasets where the search term appears
             as a complete word (e.g., 'DANA' won't match 'ciudadana').
             When enabled, automatically searches multiple pages to find matches.
@@ -715,13 +714,11 @@ async def search_datasets_by_title(
     try:
         if exact_match:
             # Search multiple pages to find exact matches
-            # Use larger page size for efficiency
-            search_page_size = 200
             max_pages = 10
             all_filtered_items: list[dict[str, Any]] = []
 
             for current_page in range(max_pages):
-                pagination = PaginationParams(page=current_page, page_size=search_page_size)
+                pagination = PaginationParams(page=current_page, page_size=DEFAULT_PAGE_SIZE)
                 data = await client.search_datasets_by_title(title, pagination)
 
                 result = data.get("result", {})
@@ -735,12 +732,12 @@ async def search_datasets_by_title(
                 all_filtered_items.extend(filtered)
 
                 # Stop if we have enough results
-                if len(all_filtered_items) >= page_size:
+                if len(all_filtered_items) >= DEFAULT_PAGE_SIZE:
                     break
 
             # Apply pagination to filtered results
-            start_idx = page * page_size
-            end_idx = start_idx + page_size
+            start_idx = page * DEFAULT_PAGE_SIZE
+            end_idx = start_idx + DEFAULT_PAGE_SIZE
             paginated_items = all_filtered_items[start_idx:end_idx]
 
             # Build response
@@ -748,7 +745,7 @@ async def search_datasets_by_title(
                 "total_in_page": len(paginated_items),
                 "total_exact_matches": len(all_filtered_items),
                 "page": page,
-                "items_per_page": page_size,
+                "items_per_page": DEFAULT_PAGE_SIZE,
                 "exact_match": True,
                 "datasets": [
                     DatasetSummary.from_api_item(item).model_dump(exclude_none=True)
@@ -759,7 +756,7 @@ async def search_datasets_by_title(
 
         else:
             # Normal search (substring match)
-            pagination = PaginationParams(page=page, page_size=page_size)
+            pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
             data = await client.search_datasets_by_title(title, pagination)
             return _format_response(data, "dataset")
 
@@ -771,7 +768,6 @@ async def search_datasets_by_title(
 async def get_datasets_by_publisher(
     publisher_id: str,
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """Get datasets from a specific publisher/organization.
 
@@ -781,13 +777,12 @@ async def get_datasets_by_publisher(
     Args:
         publisher_id: Publisher identifier (e.g., 'A16003011' for INE).
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets from the specified publisher.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_datasets_by_publisher(publisher_id, pagination)
         return _format_response(data, "dataset")
     except Exception as e:
@@ -798,7 +793,6 @@ async def get_datasets_by_publisher(
 async def get_datasets_by_theme(
     theme_id: str,
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """Get datasets by category/theme.
 
@@ -808,13 +802,12 @@ async def get_datasets_by_theme(
     Args:
         theme_id: Theme identifier (e.g., 'economia', 'hacienda', 'educacion').
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets in the specified category.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_datasets_by_theme(theme_id, pagination)
         return _format_response(data, "dataset")
     except Exception as e:
@@ -825,7 +818,6 @@ async def get_datasets_by_theme(
 async def get_datasets_by_format(
     format_id: str,
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """Get datasets available in a specific file format.
 
@@ -835,13 +827,12 @@ async def get_datasets_by_format(
     Args:
         format_id: Format identifier (e.g., 'csv', 'json', 'xml', 'rdf', 'xlsx').
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets available in the specified format.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_datasets_by_format(format_id, pagination)
         return _format_response(data, "dataset")
     except Exception as e:
@@ -852,7 +843,6 @@ async def get_datasets_by_format(
 async def get_datasets_by_keyword(
     keyword: str,
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """Get datasets tagged with a specific keyword.
 
@@ -862,13 +852,12 @@ async def get_datasets_by_keyword(
     Args:
         keyword: Keyword/tag to search (e.g., 'presupuesto', 'gastos', 'poblacion').
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets tagged with the keyword.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_datasets_by_keyword(keyword, pagination)
         return _format_response(data, "dataset")
     except Exception as e:
@@ -880,7 +869,6 @@ async def get_datasets_by_spatial(
     spatial_type: str,
     spatial_value: str,
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """Get datasets by geographic coverage.
 
@@ -892,13 +880,12 @@ async def get_datasets_by_spatial(
         spatial_type: Geographic type (e.g., 'Autonomia', 'Provincia').
         spatial_value: Geographic value (e.g., 'Pais-Vasco', 'Madrid').
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets covering the specified area.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_datasets_by_spatial(spatial_type, spatial_value, pagination)
         return _format_response(data, "dataset")
     except Exception as e:
@@ -910,7 +897,6 @@ async def get_datasets_by_date_range(
     begin_date: str,
     end_date: str,
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """Get datasets modified within a date range.
 
@@ -921,13 +907,12 @@ async def get_datasets_by_date_range(
         begin_date: Start date in format 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-01-01T00:00Z').
         end_date: End date in format 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-12-31T23:59Z').
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets modified in the date range.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_datasets_by_date_range(begin_date, end_date, pagination)
         return _format_response(data, "dataset")
     except Exception as e:
@@ -942,7 +927,6 @@ async def get_datasets_by_date_range(
 @mcp.tool()
 async def list_distributions(
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """List all available data distributions (downloadable files).
 
@@ -951,13 +935,12 @@ async def list_distributions(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with distributions including download URLs and formats.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.list_distributions(pagination)
         return _format_response(data, "distribution")
     except Exception as e:
@@ -968,7 +951,6 @@ async def list_distributions(
 async def get_distributions_by_dataset(
     dataset_id: str,
     page: int = 0,
-    page_size: int = 200,
     include_preview: bool = False,
     preview_rows: int = 10,
 ) -> str:
@@ -980,7 +962,6 @@ async def get_distributions_by_dataset(
     Args:
         dataset_id: Dataset identifier.
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
         include_preview: If True, fetch and include a data preview for CSV/JSON files.
         preview_rows: Number of rows to include in preview (default 10, max 50).
 
@@ -989,7 +970,7 @@ async def get_distributions_by_dataset(
         each distribution will include column names and sample rows.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_distributions_by_dataset(dataset_id, pagination)
 
         if include_preview:
@@ -1005,7 +986,6 @@ async def get_distributions_by_dataset(
 async def get_distributions_by_format(
     format_id: str,
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """Get distributions (files) in a specific format.
 
@@ -1014,13 +994,12 @@ async def get_distributions_by_format(
     Args:
         format_id: Format identifier (e.g., 'csv', 'json', 'xml').
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with distributions in the specified format.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_distributions_by_format(format_id, pagination)
         return _format_response(data, "distribution")
     except Exception as e:
@@ -1035,7 +1014,6 @@ async def get_distributions_by_format(
 @mcp.tool()
 async def list_publishers(
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """List all data publishers (government organizations).
 
@@ -1044,13 +1022,12 @@ async def list_publishers(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with publisher organizations and their IDs.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.list_publishers(pagination)
         return _format_response(data)
     except Exception as e:
@@ -1060,7 +1037,6 @@ async def list_publishers(
 @mcp.tool()
 async def list_spatial_coverage(
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """List all geographic coverage options.
 
@@ -1069,13 +1045,12 @@ async def list_spatial_coverage(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with geographic coverage options.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.list_spatial_coverage(pagination)
         return _format_response(data)
     except Exception as e:
@@ -1085,7 +1060,6 @@ async def list_spatial_coverage(
 @mcp.tool()
 async def list_themes(
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """List all dataset categories/themes.
 
@@ -1094,13 +1068,12 @@ async def list_themes(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with available themes and their labels.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.list_themes(pagination)
         return _format_response(data)
     except Exception as e:
@@ -1115,7 +1088,6 @@ async def list_themes(
 @mcp.tool()
 async def list_public_sectors(
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """List all public sectors from NTI taxonomy.
 
@@ -1124,13 +1096,12 @@ async def list_public_sectors(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with public sector categories.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.list_public_sectors(pagination)
         return _format_response(data)
     except Exception as e:
@@ -1159,7 +1130,6 @@ async def get_public_sector(sector_id: str) -> str:
 @mcp.tool()
 async def list_provinces(
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """List all Spanish provinces.
 
@@ -1167,13 +1137,12 @@ async def list_provinces(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with Spanish provinces.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.list_provinces(pagination)
         return _format_response(data)
     except Exception as e:
@@ -1200,7 +1169,6 @@ async def get_province(province_id: str) -> str:
 @mcp.tool()
 async def list_autonomous_regions(
     page: int = 0,
-    page_size: int = 200,
 ) -> str:
     """List all Spanish autonomous regions (Comunidades Autónomas).
 
@@ -1208,13 +1176,12 @@ async def list_autonomous_regions(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with autonomous regions.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data = await client.list_autonomous_regions(pagination)
         return _format_response(data)
     except Exception as e:
@@ -1280,7 +1247,7 @@ async def resource_themes() -> str:
     - ciencia-tecnologia: I+D, innovación, patentes
     """
     try:
-        pagination = PaginationParams(page=0, page_size=200)
+        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
         data = await client.list_themes(pagination)
         return _format_response(data)
     except Exception as e:
@@ -1306,7 +1273,7 @@ async def resource_publishers() -> str:
     Cada publicador tiene un ID único que puede usarse para filtrar datasets.
     """
     try:
-        pagination = PaginationParams(page=0, page_size=200)
+        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
         data = await client.list_publishers(pagination)
         return _format_response(data)
     except Exception as e:
@@ -1331,7 +1298,7 @@ async def resource_provinces() -> str:
     Ejemplos de IDs: Madrid, Barcelona, Sevilla, Valencia, Vizcaya, etc.
     """
     try:
-        pagination = PaginationParams(page=0, page_size=200)
+        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
         data = await client.list_provinces(pagination)
         return _format_response(data)
     except Exception as e:
@@ -1358,7 +1325,7 @@ async def resource_autonomous_regions() -> str:
     Ejemplos de IDs: Comunidad-Madrid, Cataluna, Andalucia, Pais-Vasco
     """
     try:
-        pagination = PaginationParams(page=0, page_size=20)
+        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
         data = await client.list_autonomous_regions(pagination)
         return _format_response(data)
     except Exception as e:
@@ -1423,7 +1390,7 @@ async def resource_theme_datasets(theme_id: str) -> str:
     Ejemplo: theme://economia
     """
     try:
-        pagination = PaginationParams(page=0, page_size=20)
+        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_datasets_by_theme(theme_id, pagination)
         return _format_response(data, "dataset")
     except Exception as e:
@@ -1458,7 +1425,7 @@ async def resource_publisher_datasets(publisher_id: str) -> str:
     Ejemplo: publisher://EA0010587
     """
     try:
-        pagination = PaginationParams(page=0, page_size=20)
+        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_datasets_by_publisher(publisher_id, pagination)
         return _format_response(data, "dataset")
     except Exception as e:
@@ -1491,7 +1458,7 @@ async def resource_format_datasets(format_id: str) -> str:
     Ejemplo: format://csv
     """
     try:
-        pagination = PaginationParams(page=0, page_size=20)
+        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_datasets_by_format(format_id, pagination)
         return _format_response(data, "dataset")
     except Exception as e:
@@ -1524,7 +1491,7 @@ async def resource_keyword_datasets(keyword: str) -> str:
     Ejemplo: keyword://presupuesto
     """
     try:
-        pagination = PaginationParams(page=0, page_size=20)
+        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
         data = await client.get_datasets_by_keyword(keyword, pagination)
         return _format_response(data, "dataset")
     except Exception as e:

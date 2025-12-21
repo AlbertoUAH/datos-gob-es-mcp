@@ -706,25 +706,63 @@ async def search_datasets_by_title(
         page_size: Number of results per page (max 50).
         exact_match: If True, only return datasets where the search term appears
             as a complete word (e.g., 'DANA' won't match 'ciudadana').
+            When enabled, automatically searches multiple pages to find matches.
             Default is False for backward compatibility.
 
     Returns:
         JSON with matching datasets.
     """
     try:
-        pagination = PaginationParams(page=page, page_size=page_size)
-        data = await client.search_datasets_by_title(title, pagination)
-
         if exact_match:
-            # Filter results to only include exact word matches
-            result = data.get("result", {})
-            items = result.get("items", [])
-            filtered_items = _filter_items_by_exact_match(items, title)
+            # Search multiple pages to find exact matches
+            # Use larger page size for efficiency
+            search_page_size = 50
+            max_pages = 10
+            all_filtered_items: list[dict[str, Any]] = []
 
-            # Update the data with filtered items
-            data["result"]["items"] = filtered_items
+            for current_page in range(max_pages):
+                pagination = PaginationParams(page=current_page, page_size=search_page_size)
+                data = await client.search_datasets_by_title(title, pagination)
 
-        return _format_response(data, "dataset")
+                result = data.get("result", {})
+                items = result.get("items", [])
+
+                if not items:
+                    break  # No more results
+
+                # Filter for exact matches
+                filtered = _filter_items_by_exact_match(items, title)
+                all_filtered_items.extend(filtered)
+
+                # Stop if we have enough results
+                if len(all_filtered_items) >= page_size:
+                    break
+
+            # Apply pagination to filtered results
+            start_idx = page * page_size
+            end_idx = start_idx + page_size
+            paginated_items = all_filtered_items[start_idx:end_idx]
+
+            # Build response
+            output = {
+                "total_in_page": len(paginated_items),
+                "total_exact_matches": len(all_filtered_items),
+                "page": page,
+                "items_per_page": page_size,
+                "exact_match": True,
+                "datasets": [
+                    DatasetSummary.from_api_item(item).model_dump(exclude_none=True)
+                    for item in paginated_items
+                ],
+            }
+            return json.dumps(output, ensure_ascii=False, indent=2)
+
+        else:
+            # Normal search (substring match)
+            pagination = PaginationParams(page=page, page_size=page_size)
+            data = await client.search_datasets_by_title(title, pagination)
+            return _format_response(data, "dataset")
+
     except Exception as e:
         return _handle_error(e)
 

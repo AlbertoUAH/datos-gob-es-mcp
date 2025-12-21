@@ -409,6 +409,73 @@ def _filter_items_by_exact_match(
     return filtered
 
 
+def _filter_datasets_locally(
+    items: list[dict[str, Any]],
+    publisher: str | None = None,
+    theme: str | None = None,
+    format_filter: str | None = None,
+    keyword: str | None = None,
+) -> list[dict[str, Any]]:
+    """Apply local filtering to dataset items after API query."""
+    if not any([publisher, theme, format_filter, keyword]):
+        return items
+
+    filtered = []
+    for item in items:
+        # Check publisher filter
+        if publisher:
+            item_publisher = item.get("publisher", {})
+            if isinstance(item_publisher, dict):
+                pub_id = item_publisher.get("_about", "")
+            else:
+                pub_id = str(item_publisher)
+            if publisher.lower() not in pub_id.lower():
+                continue
+
+        # Check theme filter
+        if theme:
+            item_themes = item.get("theme", [])
+            if isinstance(item_themes, str):
+                item_themes = [item_themes]
+            theme_match = any(theme.lower() in t.lower() for t in item_themes)
+            if not theme_match:
+                continue
+
+        # Check format filter (in distributions)
+        if format_filter:
+            distributions = item.get("distribution", [])
+            if isinstance(distributions, dict):
+                distributions = [distributions]
+            format_match = False
+            for dist in distributions:
+                dist_format = dist.get("format", "")
+                if isinstance(dist_format, dict):
+                    dist_format = dist_format.get("value", "")
+                if format_filter.lower() in dist_format.lower():
+                    format_match = True
+                    break
+            if not format_match:
+                continue
+
+        # Check keyword filter
+        if keyword:
+            item_keywords = item.get("keyword", [])
+            if isinstance(item_keywords, str):
+                item_keywords = [item_keywords]
+            kw_texts = []
+            for kw in item_keywords:
+                if isinstance(kw, dict):
+                    kw_texts.append(kw.get("_value", "").lower())
+                else:
+                    kw_texts.append(str(kw).lower())
+            if keyword.lower() not in " ".join(kw_texts):
+                continue
+
+        filtered.append(item)
+
+    return filtered
+
+
 # Fixed page size for all queries (API maximum)
 DEFAULT_PAGE_SIZE = 200
 
@@ -690,231 +757,135 @@ async def get_dataset(dataset_id: str) -> str:
 
 
 @mcp.tool()
-async def search_datasets_by_title(
-    title: str,
-    page: int = 0,
+async def search_datasets(
+    title: str | None = None,
+    publisher: str | None = None,
+    theme: str | None = None,
+    format: str | None = None,
+    keyword: str | None = None,
+    spatial_type: str | None = None,
+    spatial_value: str | None = None,
+    date_start: str | None = None,
+    date_end: str | None = None,
     exact_match: bool = False,
+    page: int = 0,
 ) -> str:
-    """Search datasets by title text.
+    """Search and filter datasets from the Spanish open data catalog.
 
-    Find datasets whose title contains the search term. Useful for finding
-    specific topics like 'presupuesto', 'empleo', 'educacion', etc.
+    All filter parameters are optional and can be combined. When multiple filters
+    are provided, the API query uses one filter and results are filtered locally.
 
     Args:
-        title: Text to search in dataset titles (partial match supported).
+        title: Search text in dataset titles.
+        publisher: Publisher ID (e.g., 'EA0010587' for INE). Use list_publishers to find IDs.
+        theme: Theme ID (e.g., 'economia', 'salud', 'educacion'). Use list_themes to find IDs.
+        format: Format ID (e.g., 'csv', 'json', 'xml').
+        keyword: Keyword/tag to filter by (e.g., 'presupuesto', 'poblacion').
+        spatial_type: Geographic type ('Autonomia', 'Provincia').
+        spatial_value: Geographic value ('Madrid', 'Cataluna', 'Pais-Vasco').
+        date_start: Start date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-01-01T00:00Z').
+        date_end: End date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-12-31T23:59Z').
+        exact_match: If True with title, match whole words only (e.g., 'DANA' won't match 'ciudadana').
         page: Page number (starting from 0).
-        exact_match: If True, only return datasets where the search term appears
-            as a complete word (e.g., 'DANA' won't match 'ciudadana').
-            When enabled, automatically searches multiple pages to find matches.
-            Default is False for backward compatibility.
 
     Returns:
         JSON with matching datasets.
     """
     try:
-        if exact_match:
-            # Search multiple pages to find exact matches
-            max_pages = 10
-            all_filtered_items: list[dict[str, Any]] = []
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
+        data: dict[str, Any] | None = None
+        local_filters: dict[str, Any] = {}
 
-            for current_page in range(max_pages):
-                pagination = PaginationParams(page=current_page, page_size=DEFAULT_PAGE_SIZE)
+        # Priority order for API query: title > date > spatial > publisher > theme > format > keyword
+        if title:
+            if exact_match:
+                # Search multiple pages to find exact matches
+                max_pages = 10
+                all_filtered_items: list[dict[str, Any]] = []
+
+                for current_page in range(max_pages):
+                    page_pagination = PaginationParams(page=current_page, page_size=DEFAULT_PAGE_SIZE)
+                    data = await client.search_datasets_by_title(title, page_pagination)
+
+                    result = data.get("result", {})
+                    items = result.get("items", [])
+
+                    if not items:
+                        break
+
+                    filtered = _filter_items_by_exact_match(items, title)
+                    # Apply local filters
+                    filtered = _filter_datasets_locally(
+                        filtered, publisher, theme, format, keyword
+                    )
+                    all_filtered_items.extend(filtered)
+
+                    if len(all_filtered_items) >= DEFAULT_PAGE_SIZE:
+                        break
+
+                start_idx = page * DEFAULT_PAGE_SIZE
+                end_idx = start_idx + DEFAULT_PAGE_SIZE
+                paginated_items = all_filtered_items[start_idx:end_idx]
+
+                output = {
+                    "total_in_page": len(paginated_items),
+                    "total_exact_matches": len(all_filtered_items),
+                    "page": page,
+                    "items_per_page": DEFAULT_PAGE_SIZE,
+                    "exact_match": True,
+                    "datasets": [
+                        DatasetSummary.from_api_item(item).model_dump(exclude_none=True)
+                        for item in paginated_items
+                    ],
+                }
+                return json.dumps(output, ensure_ascii=False, indent=2)
+            else:
                 data = await client.search_datasets_by_title(title, pagination)
+                local_filters = {"publisher": publisher, "theme": theme, "format": format, "keyword": keyword}
 
-                result = data.get("result", {})
-                items = result.get("items", [])
+        elif date_start and date_end:
+            data = await client.get_datasets_by_date_range(date_start, date_end, pagination)
+            local_filters = {"publisher": publisher, "theme": theme, "format": format, "keyword": keyword}
 
-                if not items:
-                    break  # No more results
+        elif spatial_type and spatial_value:
+            data = await client.get_datasets_by_spatial(spatial_type, spatial_value, pagination)
+            local_filters = {"publisher": publisher, "theme": theme, "format": format, "keyword": keyword}
 
-                # Filter for exact matches
-                filtered = _filter_items_by_exact_match(items, title)
-                all_filtered_items.extend(filtered)
+        elif publisher:
+            data = await client.get_datasets_by_publisher(publisher, pagination)
+            local_filters = {"theme": theme, "format": format, "keyword": keyword}
 
-                # Stop if we have enough results
-                if len(all_filtered_items) >= DEFAULT_PAGE_SIZE:
-                    break
+        elif theme:
+            data = await client.get_datasets_by_theme(theme, pagination)
+            local_filters = {"publisher": publisher, "format": format, "keyword": keyword}
 
-            # Apply pagination to filtered results
-            start_idx = page * DEFAULT_PAGE_SIZE
-            end_idx = start_idx + DEFAULT_PAGE_SIZE
-            paginated_items = all_filtered_items[start_idx:end_idx]
+        elif format:
+            data = await client.get_datasets_by_format(format, pagination)
+            local_filters = {"publisher": publisher, "theme": theme, "keyword": keyword}
 
-            # Build response
-            output = {
-                "total_in_page": len(paginated_items),
-                "total_exact_matches": len(all_filtered_items),
-                "page": page,
-                "items_per_page": DEFAULT_PAGE_SIZE,
-                "exact_match": True,
-                "datasets": [
-                    DatasetSummary.from_api_item(item).model_dump(exclude_none=True)
-                    for item in paginated_items
-                ],
-            }
-            return json.dumps(output, ensure_ascii=False, indent=2)
+        elif keyword:
+            data = await client.get_datasets_by_keyword(keyword, pagination)
+            local_filters = {"publisher": publisher, "theme": theme, "format": format}
 
         else:
-            # Normal search (substring match)
-            pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-            data = await client.search_datasets_by_title(title, pagination)
-            return _format_response(data, "dataset")
+            # No filters provided, list all datasets
+            data = await client.list_datasets(pagination)
 
-    except Exception as e:
-        return _handle_error(e)
+        # Apply local filtering if needed
+        if data and any(local_filters.values()):
+            result = data.get("result", {})
+            items = result.get("items", [])
+            filtered_items = _filter_datasets_locally(
+                items,
+                local_filters.get("publisher"),
+                local_filters.get("theme"),
+                local_filters.get("format"),
+                local_filters.get("keyword"),
+            )
+            data["result"]["items"] = filtered_items
 
+        return _format_response(data, "dataset") if data else json.dumps({"error": "No data"})
 
-@mcp.tool()
-async def get_datasets_by_publisher(
-    publisher_id: str,
-    page: int = 0,
-) -> str:
-    """Get datasets from a specific publisher/organization.
-
-    Find all datasets published by a government institution. Use list_publishers
-    to discover available publisher IDs.
-
-    Args:
-        publisher_id: Publisher identifier (e.g., 'A16003011' for INE).
-        page: Page number (starting from 0).
-
-    Returns:
-        JSON with datasets from the specified publisher.
-    """
-    try:
-        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.get_datasets_by_publisher(publisher_id, pagination)
-        return _format_response(data, "dataset")
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.tool()
-async def get_datasets_by_theme(
-    theme_id: str,
-    page: int = 0,
-) -> str:
-    """Get datasets by category/theme.
-
-    Browse datasets in a specific topic area. Common themes include:
-    economia, hacienda, educacion, salud, medio-ambiente, transporte, turismo.
-
-    Args:
-        theme_id: Theme identifier (e.g., 'economia', 'hacienda', 'educacion').
-        page: Page number (starting from 0).
-
-    Returns:
-        JSON with datasets in the specified category.
-    """
-    try:
-        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.get_datasets_by_theme(theme_id, pagination)
-        return _format_response(data, "dataset")
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.tool()
-async def get_datasets_by_format(
-    format_id: str,
-    page: int = 0,
-) -> str:
-    """Get datasets available in a specific file format.
-
-    Find datasets that have distributions in formats like CSV, JSON, XML,
-    RDF, etc. Useful when you need data in a particular format.
-
-    Args:
-        format_id: Format identifier (e.g., 'csv', 'json', 'xml', 'rdf', 'xlsx').
-        page: Page number (starting from 0).
-
-    Returns:
-        JSON with datasets available in the specified format.
-    """
-    try:
-        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.get_datasets_by_format(format_id, pagination)
-        return _format_response(data, "dataset")
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.tool()
-async def get_datasets_by_keyword(
-    keyword: str,
-    page: int = 0,
-) -> str:
-    """Get datasets tagged with a specific keyword.
-
-    Search datasets by their assigned tags/keywords. Keywords are more specific
-    than themes and help find focused datasets.
-
-    Args:
-        keyword: Keyword/tag to search (e.g., 'presupuesto', 'gastos', 'poblacion').
-        page: Page number (starting from 0).
-
-    Returns:
-        JSON with datasets tagged with the keyword.
-    """
-    try:
-        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.get_datasets_by_keyword(keyword, pagination)
-        return _format_response(data, "dataset")
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.tool()
-async def get_datasets_by_spatial(
-    spatial_type: str,
-    spatial_value: str,
-    page: int = 0,
-) -> str:
-    """Get datasets by geographic coverage.
-
-    Find datasets that cover a specific geographic area. Examples:
-    - Autonomia/Pais-Vasco, Autonomia/Cataluna, Autonomia/Comunidad-Madrid
-    - Provincia/Madrid, Provincia/Barcelona
-
-    Args:
-        spatial_type: Geographic type (e.g., 'Autonomia', 'Provincia').
-        spatial_value: Geographic value (e.g., 'Pais-Vasco', 'Madrid').
-        page: Page number (starting from 0).
-
-    Returns:
-        JSON with datasets covering the specified area.
-    """
-    try:
-        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.get_datasets_by_spatial(spatial_type, spatial_value, pagination)
-        return _format_response(data, "dataset")
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.tool()
-async def get_datasets_by_date_range(
-    begin_date: str,
-    end_date: str,
-    page: int = 0,
-) -> str:
-    """Get datasets modified within a date range.
-
-    Find datasets that were updated between two dates. Useful for tracking
-    recent updates or finding historical data changes.
-
-    Args:
-        begin_date: Start date in format 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-01-01T00:00Z').
-        end_date: End date in format 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-12-31T23:59Z').
-        page: Page number (starting from 0).
-
-    Returns:
-        JSON with datasets modified in the date range.
-    """
-    try:
-        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.get_datasets_by_date_range(begin_date, end_date, pagination)
-        return _format_response(data, "dataset")
     except Exception as e:
         return _handle_error(e)
 
@@ -925,15 +896,22 @@ async def get_datasets_by_date_range(
 
 
 @mcp.tool()
-async def list_distributions(
+async def get_distributions(
+    dataset_id: str | None = None,
+    format: str | None = None,
+    include_preview: bool = False,
+    preview_rows: int = 10,
     page: int = 0,
 ) -> str:
-    """List all available data distributions (downloadable files).
+    """Get downloadable files (distributions) from the open data catalog.
 
-    Browse individual downloadable files across all datasets. Each distribution
-    is a specific file format (CSV, JSON, etc.) for a dataset.
+    Can filter by dataset or format. If no filters provided, lists all distributions.
 
     Args:
+        dataset_id: Get distributions for a specific dataset.
+        format: Filter by format (e.g., 'csv', 'json', 'xml').
+        include_preview: Include data preview for CSV/JSON files (only with dataset_id).
+        preview_rows: Number of preview rows (default 10, max 50).
         page: Page number (starting from 0).
 
     Returns:
@@ -941,66 +919,17 @@ async def list_distributions(
     """
     try:
         pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.list_distributions(pagination)
-        return _format_response(data, "distribution")
-    except Exception as e:
-        return _handle_error(e)
 
+        if dataset_id:
+            data = await client.get_distributions_by_dataset(dataset_id, pagination)
+            if include_preview:
+                preview_rows = min(max(1, preview_rows), 50)
+                return await _format_response_with_preview(data, preview_rows)
+        elif format:
+            data = await client.get_distributions_by_format(format, pagination)
+        else:
+            data = await client.list_distributions(pagination)
 
-@mcp.tool()
-async def get_distributions_by_dataset(
-    dataset_id: str,
-    page: int = 0,
-    include_preview: bool = False,
-    preview_rows: int = 10,
-) -> str:
-    """Get all downloadable files for a specific dataset.
-
-    List all available formats and download URLs for a dataset.
-    Use this after finding an interesting dataset to get its files.
-
-    Args:
-        dataset_id: Dataset identifier.
-        page: Page number (starting from 0).
-        include_preview: If True, fetch and include a data preview for CSV/JSON files.
-        preview_rows: Number of rows to include in preview (default 10, max 50).
-
-    Returns:
-        JSON with distributions for the dataset. If include_preview=True,
-        each distribution will include column names and sample rows.
-    """
-    try:
-        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.get_distributions_by_dataset(dataset_id, pagination)
-
-        if include_preview:
-            preview_rows = min(max(1, preview_rows), 50)  # Clamp to 1-50
-            return await _format_response_with_preview(data, preview_rows)
-
-        return _format_response(data, "distribution")
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.tool()
-async def get_distributions_by_format(
-    format_id: str,
-    page: int = 0,
-) -> str:
-    """Get distributions (files) in a specific format.
-
-    Find downloadable files in a particular format across all datasets.
-
-    Args:
-        format_id: Format identifier (e.g., 'csv', 'json', 'xml').
-        page: Page number (starting from 0).
-
-    Returns:
-        JSON with distributions in the specified format.
-    """
-    try:
-        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.get_distributions_by_format(format_id, pagination)
         return _format_response(data, "distribution")
     except Exception as e:
         return _handle_error(e)

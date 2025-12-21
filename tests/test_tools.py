@@ -5,16 +5,8 @@ import pytest
 from server import (
     list_datasets,
     get_dataset,
-    search_datasets_by_title,
-    get_datasets_by_publisher,
-    get_datasets_by_theme,
-    get_datasets_by_format,
-    get_datasets_by_keyword,
-    get_datasets_by_spatial,
-    get_datasets_by_date_range,
-    list_distributions,
-    get_distributions_by_dataset,
-    get_distributions_by_format,
+    search_datasets,
+    get_distributions,
     list_publishers,
     list_themes,
     list_spatial_coverage,
@@ -69,66 +61,75 @@ class TestDatasetTools:
 
     @pytest.mark.asyncio
     async def test_search_datasets_by_title(self, mock_api):
-        """Test search_datasets_by_title tool."""
-        fn = get_tool_fn(search_datasets_by_title)
-        result = await fn("empleo")
+        """Test search_datasets with title filter."""
+        fn = get_tool_fn(search_datasets)
+        result = await fn(title="empleo")
         data = json.loads(result)
 
         assert "datasets" in data
 
     @pytest.mark.asyncio
-    async def test_get_datasets_by_publisher(self, mock_api):
-        """Test get_datasets_by_publisher tool."""
-        fn = get_tool_fn(get_datasets_by_publisher)
-        result = await fn("E00003901")
+    async def test_search_datasets_by_publisher(self, mock_api):
+        """Test search_datasets with publisher filter."""
+        fn = get_tool_fn(search_datasets)
+        result = await fn(publisher="E00003901")
         data = json.loads(result)
 
         assert "datasets" in data
 
     @pytest.mark.asyncio
-    async def test_get_datasets_by_theme(self, mock_api):
-        """Test get_datasets_by_theme tool."""
-        fn = get_tool_fn(get_datasets_by_theme)
-        result = await fn("economia")
+    async def test_search_datasets_by_theme(self, mock_api):
+        """Test search_datasets with theme filter."""
+        fn = get_tool_fn(search_datasets)
+        result = await fn(theme="economia")
         data = json.loads(result)
 
         assert "datasets" in data
 
     @pytest.mark.asyncio
-    async def test_get_datasets_by_format(self, mock_api):
-        """Test get_datasets_by_format tool."""
-        fn = get_tool_fn(get_datasets_by_format)
-        result = await fn("csv")
+    async def test_search_datasets_by_format(self, mock_api):
+        """Test search_datasets with format filter."""
+        fn = get_tool_fn(search_datasets)
+        result = await fn(format="csv")
         data = json.loads(result)
 
         assert "datasets" in data
 
     @pytest.mark.asyncio
-    async def test_get_datasets_by_keyword(self, mock_api):
-        """Test get_datasets_by_keyword tool."""
-        fn = get_tool_fn(get_datasets_by_keyword)
-        result = await fn("presupuesto")
+    async def test_search_datasets_by_keyword(self, mock_api):
+        """Test search_datasets with keyword filter."""
+        fn = get_tool_fn(search_datasets)
+        result = await fn(keyword="presupuesto")
         data = json.loads(result)
 
         assert "datasets" in data
 
     @pytest.mark.asyncio
-    async def test_get_datasets_by_spatial(self, mock_api):
-        """Test get_datasets_by_spatial tool."""
-        fn = get_tool_fn(get_datasets_by_spatial)
-        result = await fn("Autonomia", "Comunidad-Madrid")
+    async def test_search_datasets_by_spatial(self, mock_api):
+        """Test search_datasets with spatial filter."""
+        fn = get_tool_fn(search_datasets)
+        result = await fn(spatial_type="Autonomia", spatial_value="Comunidad-Madrid")
         data = json.loads(result)
 
         assert "datasets" in data
 
     @pytest.mark.asyncio
-    async def test_get_datasets_by_date_range(self, mock_api):
-        """Test get_datasets_by_date_range tool."""
-        fn = get_tool_fn(get_datasets_by_date_range)
+    async def test_search_datasets_by_date_range(self, mock_api):
+        """Test search_datasets with date range filter."""
+        fn = get_tool_fn(search_datasets)
         result = await fn(
-            "2024-01-01T00:00Z",
-            "2024-12-31T23:59Z"
+            date_start="2024-01-01T00:00Z",
+            date_end="2024-12-31T23:59Z"
         )
+        data = json.loads(result)
+
+        assert "datasets" in data
+
+    @pytest.mark.asyncio
+    async def test_search_datasets_no_filter(self, mock_api):
+        """Test search_datasets with no filters (lists all)."""
+        fn = get_tool_fn(search_datasets)
+        result = await fn()
         data = json.loads(result)
 
         assert "datasets" in data
@@ -138,9 +139,9 @@ class TestDistributionTools:
     """Tests for distribution-related MCP tools."""
 
     @pytest.mark.asyncio
-    async def test_list_distributions(self, mock_api):
-        """Test list_distributions tool."""
-        fn = get_tool_fn(list_distributions)
+    async def test_get_distributions_all(self, mock_api):
+        """Test get_distributions with no filter (lists all)."""
+        fn = get_tool_fn(get_distributions)
         result = await fn()
         data = json.loads(result)
 
@@ -149,18 +150,18 @@ class TestDistributionTools:
 
     @pytest.mark.asyncio
     async def test_get_distributions_by_dataset(self, mock_api):
-        """Test get_distributions_by_dataset tool."""
-        fn = get_tool_fn(get_distributions_by_dataset)
-        result = await fn("test-dataset-123")
+        """Test get_distributions with dataset_id filter."""
+        fn = get_tool_fn(get_distributions)
+        result = await fn(dataset_id="test-dataset-123")
         data = json.loads(result)
 
         assert "distributions" in data
 
     @pytest.mark.asyncio
     async def test_get_distributions_by_format(self, mock_api):
-        """Test get_distributions_by_format tool."""
-        fn = get_tool_fn(get_distributions_by_format)
-        result = await fn("csv")
+        """Test get_distributions with format filter."""
+        fn = get_tool_fn(get_distributions)
+        result = await fn(format="csv")
         data = json.loads(result)
 
         assert "distributions" in data

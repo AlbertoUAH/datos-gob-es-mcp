@@ -3,6 +3,7 @@
 import csv
 import io
 import json
+import re
 from typing import Any
 from urllib.parse import urljoin
 
@@ -365,6 +366,49 @@ def _handle_error(e: Exception) -> str:
     return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
+def _extract_text_for_match(value: Any) -> str:
+    """Extract text from a field for matching purposes."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return value.get("_value", str(value))
+    if isinstance(value, list):
+        texts = []
+        for item in value:
+            if isinstance(item, str):
+                texts.append(item)
+            elif isinstance(item, dict):
+                texts.append(item.get("_value", str(item)))
+        return " ".join(texts)
+    return str(value)
+
+
+def _matches_exact_word(text: str, search_term: str) -> bool:
+    """Check if text contains the search term as a complete word."""
+    # Use word boundary regex for exact word matching
+    # \b matches word boundaries (start/end of word)
+    pattern = rf"\b{re.escape(search_term)}\b"
+    return bool(re.search(pattern, text, re.IGNORECASE))
+
+
+def _filter_items_by_exact_match(
+    items: list[dict[str, Any]],
+    search_term: str,
+    fields: list[str] = ["title", "description"]
+) -> list[dict[str, Any]]:
+    """Filter items to only include those with exact word matches."""
+    filtered = []
+    for item in items:
+        for field in fields:
+            text = _extract_text_for_match(item.get(field))
+            if _matches_exact_word(text, search_term):
+                filtered.append(item)
+                break  # Item matches, no need to check other fields
+    return filtered
+
+
 # Maximum bytes to download for preview
 PREVIEW_MAX_BYTES = 100 * 1024  # 100KB
 PREVIEW_TIMEOUT = 10.0  # 10 seconds
@@ -649,6 +693,7 @@ async def search_datasets_by_title(
     title: str,
     page: int = 0,
     page_size: int = 10,
+    exact_match: bool = False,
 ) -> str:
     """Search datasets by title text.
 
@@ -659,6 +704,9 @@ async def search_datasets_by_title(
         title: Text to search in dataset titles (partial match supported).
         page: Page number (starting from 0).
         page_size: Number of results per page (max 50).
+        exact_match: If True, only return datasets where the search term appears
+            as a complete word (e.g., 'DANA' won't match 'ciudadana').
+            Default is False for backward compatibility.
 
     Returns:
         JSON with matching datasets.
@@ -666,6 +714,16 @@ async def search_datasets_by_title(
     try:
         pagination = PaginationParams(page=page, page_size=page_size)
         data = await client.search_datasets_by_title(title, pagination)
+
+        if exact_match:
+            # Filter results to only include exact word matches
+            result = data.get("result", {})
+            items = result.get("items", [])
+            filtered_items = _filter_items_by_exact_match(items, title)
+
+            # Update the data with filtered items
+            data["result"]["items"] = filtered_items
+
         return _format_response(data, "dataset")
     except Exception as e:
         return _handle_error(e)

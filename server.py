@@ -654,7 +654,7 @@ async def list_datasets(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
         sort: Sort field. Use '-' prefix for descending. Examples: '-modified', 'title', '-issued'.
 
     Returns:
@@ -703,7 +703,7 @@ async def search_datasets_by_title(
     Args:
         title: Text to search in dataset titles (partial match supported).
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
         exact_match: If True, only return datasets where the search term appears
             as a complete word (e.g., 'DANA' won't match 'ciudadana').
             When enabled, automatically searches multiple pages to find matches.
@@ -781,7 +781,7 @@ async def get_datasets_by_publisher(
     Args:
         publisher_id: Publisher identifier (e.g., 'A16003011' for INE).
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets from the specified publisher.
@@ -808,7 +808,7 @@ async def get_datasets_by_theme(
     Args:
         theme_id: Theme identifier (e.g., 'economia', 'hacienda', 'educacion').
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets in the specified category.
@@ -835,7 +835,7 @@ async def get_datasets_by_format(
     Args:
         format_id: Format identifier (e.g., 'csv', 'json', 'xml', 'rdf', 'xlsx').
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets available in the specified format.
@@ -862,7 +862,7 @@ async def get_datasets_by_keyword(
     Args:
         keyword: Keyword/tag to search (e.g., 'presupuesto', 'gastos', 'poblacion').
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets tagged with the keyword.
@@ -892,7 +892,7 @@ async def get_datasets_by_spatial(
         spatial_type: Geographic type (e.g., 'Autonomia', 'Provincia').
         spatial_value: Geographic value (e.g., 'Pais-Vasco', 'Madrid').
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets covering the specified area.
@@ -921,7 +921,7 @@ async def get_datasets_by_date_range(
         begin_date: Start date in format 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-01-01T00:00Z').
         end_date: End date in format 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-12-31T23:59Z').
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with datasets modified in the date range.
@@ -951,7 +951,7 @@ async def list_distributions(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with distributions including download URLs and formats.
@@ -980,7 +980,7 @@ async def get_distributions_by_dataset(
     Args:
         dataset_id: Dataset identifier.
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
         include_preview: If True, fetch and include a data preview for CSV/JSON files.
         preview_rows: Number of rows to include in preview (default 10, max 50).
 
@@ -1014,7 +1014,7 @@ async def get_distributions_by_format(
     Args:
         format_id: Format identifier (e.g., 'csv', 'json', 'xml').
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with distributions in the specified format.
@@ -1044,7 +1044,7 @@ async def list_publishers(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with publisher organizations and their IDs.
@@ -1069,7 +1069,7 @@ async def list_spatial_coverage(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with geographic coverage options.
@@ -1094,7 +1094,7 @@ async def list_themes(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with available themes and their labels.
@@ -1124,7 +1124,7 @@ async def list_public_sectors(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with public sector categories.
@@ -1167,7 +1167,7 @@ async def list_provinces(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with Spanish provinces.
@@ -1208,7 +1208,7 @@ async def list_autonomous_regions(
 
     Args:
         page: Page number (starting from 0).
-        page_size: Number of results per page (max 200).
+        page_size: Results per page. Use 200 for best results (max 200).
 
     Returns:
         JSON with autonomous regions.

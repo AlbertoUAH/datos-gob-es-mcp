@@ -35,15 +35,31 @@ from core import setup_logging, get_logger, HTTPClient
 setup_logging()
 logger = get_logger("datos_gob_es")
 
-# Optional imports for semantic search (lazy loaded)
-try:
-    import numpy as np
-    from sentence_transformers import SentenceTransformer
-    EMBEDDINGS_AVAILABLE = True
-except ImportError:
-    EMBEDDINGS_AVAILABLE = False
-    np = None
-    SentenceTransformer = None
+# Semantic search dependencies (lazy loaded on first use)
+np = None
+SentenceTransformer = None
+EMBEDDINGS_AVAILABLE: bool | None = None  # None = not checked yet
+
+
+def _load_embeddings_dependencies() -> bool:
+    """Lazy load numpy and sentence_transformers on first use."""
+    global np, SentenceTransformer, EMBEDDINGS_AVAILABLE
+
+    if EMBEDDINGS_AVAILABLE is not None:
+        return EMBEDDINGS_AVAILABLE
+
+    try:
+        import numpy as _np
+        from sentence_transformers import SentenceTransformer as _ST
+        np = _np
+        SentenceTransformer = _ST
+        EMBEDDINGS_AVAILABLE = True
+        logger.info("embeddings_loaded", status="success")
+    except ImportError as e:
+        EMBEDDINGS_AVAILABLE = False
+        logger.warning("embeddings_unavailable", error=str(e))
+
+    return EMBEDDINGS_AVAILABLE
 
 
 # =============================================================================
@@ -458,7 +474,8 @@ class EmbeddingIndex:
 
     def _load_model(self):
         """Lazy load the embedding model."""
-        if not EMBEDDINGS_AVAILABLE:
+        # Lazy load dependencies on first use
+        if not _load_embeddings_dependencies():
             raise RuntimeError(
                 "Semantic search requires sentence-transformers and numpy. "
                 "Install with: pip install sentence-transformers numpy"
@@ -1964,7 +1981,8 @@ async def semantic_search(
     Returns:
         JSON with matching datasets ranked by semantic relevance score.
     """
-    if not EMBEDDINGS_AVAILABLE:
+    # Lazy load embeddings dependencies on first use
+    if not _load_embeddings_dependencies():
         return json.dumps({
             "error": "Semantic search not available. Install dependencies with: pip install sentence-transformers numpy",
             "suggestion": "Use search_datasets with title parameter for keyword-based search instead."

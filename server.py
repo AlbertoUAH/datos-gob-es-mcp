@@ -6,10 +6,23 @@ import json
 import os
 import pickle
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
 from urllib.parse import urljoin
+
+
+def normalize_text(text: str) -> str:
+    """Remove accents and normalize text for API searches.
+
+    The datos.gob.es API doesn't handle accented characters well,
+    so we normalize them before searching.
+    """
+    # Normalize to NFD form (decomposed), remove combining characters (accents)
+    normalized = unicodedata.normalize('NFD', text)
+    without_accents = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+    return without_accents
 
 import httpx
 from fastmcp import FastMCP
@@ -700,9 +713,10 @@ def _filter_datasets_locally(
     theme: str | None = None,
     format_filter: str | None = None,
     keyword: str | None = None,
+    title: str | None = None,
 ) -> list[dict[str, Any]]:
     """Apply local filtering to dataset items after API query."""
-    if not any([publisher, theme, format_filter, keyword]):
+    if not any([publisher, theme, format_filter, keyword, title]):
         return items
 
     filtered = []
@@ -742,18 +756,77 @@ def _filter_datasets_locally(
             if not format_match:
                 continue
 
-        # Check keyword filter
+        # Check title filter (searches in title field)
+        if title:
+            title_lower = normalize_text(title.lower())
+            title_found = False
+            item_title = item.get("title", [])
+            if isinstance(item_title, list):
+                for t in item_title:
+                    if isinstance(t, dict):
+                        title_text = normalize_text(t.get("_value", "").lower())
+                    else:
+                        title_text = normalize_text(str(t).lower())
+                    if title_lower in title_text:
+                        title_found = True
+                        break
+            elif isinstance(item_title, str):
+                if title_lower in normalize_text(item_title.lower()):
+                    title_found = True
+            if not title_found:
+                continue
+
+        # Check keyword filter (also searches in title and description)
         if keyword:
+            keyword_lower = normalize_text(keyword.lower())
+            found = False
+
+            # Check keywords field
             item_keywords = item.get("keyword", [])
             if isinstance(item_keywords, str):
                 item_keywords = [item_keywords]
             kw_texts = []
             for kw in item_keywords:
                 if isinstance(kw, dict):
-                    kw_texts.append(kw.get("_value", "").lower())
+                    kw_texts.append(normalize_text(kw.get("_value", "").lower()))
                 else:
-                    kw_texts.append(str(kw).lower())
-            if keyword.lower() not in " ".join(kw_texts):
+                    kw_texts.append(normalize_text(str(kw).lower()))
+            if keyword_lower in " ".join(kw_texts):
+                found = True
+
+            # Also check title
+            if not found:
+                item_title = item.get("title", [])
+                if isinstance(item_title, list):
+                    for t in item_title:
+                        if isinstance(t, dict):
+                            title_text = normalize_text(t.get("_value", "").lower())
+                        else:
+                            title_text = normalize_text(str(t).lower())
+                        if keyword_lower in title_text:
+                            found = True
+                            break
+                elif isinstance(item_title, str):
+                    if keyword_lower in normalize_text(item_title.lower()):
+                        found = True
+
+            # Also check description
+            if not found:
+                item_desc = item.get("description", [])
+                if isinstance(item_desc, list):
+                    for d in item_desc:
+                        if isinstance(d, dict):
+                            desc_text = normalize_text(d.get("_value", "").lower())
+                        else:
+                            desc_text = normalize_text(str(d).lower())
+                        if keyword_lower in desc_text:
+                            found = True
+                            break
+                elif isinstance(item_desc, str):
+                    if keyword_lower in normalize_text(item_desc.lower()):
+                        found = True
+
+            if not found:
                 continue
 
         filtered.append(item)
@@ -1118,9 +1191,11 @@ async def search_datasets(
                 max_pages = 50 if fetch_all else 10
                 all_filtered_items: list[dict[str, Any]] = []
 
+                # Normalize title for API (remove accents)
+                normalized_title = normalize_text(title)
                 for current_page in range(max_pages):
                     page_pagination = PaginationParams(page=current_page, page_size=DEFAULT_PAGE_SIZE)
-                    data = await client.search_datasets_by_title(title, page_pagination)
+                    data = await client.search_datasets_by_title(normalized_title, page_pagination)
 
                     result = data.get("result", {})
                     items = result.get("items", [])
@@ -1169,8 +1244,26 @@ async def search_datasets(
                     }
                 return json.dumps(output, ensure_ascii=False, indent=2)
             else:
-                data = await client.search_datasets_by_title(title, pagination)
-                local_filters = {"publisher": publisher, "theme": theme, "format": format, "keyword": keyword}
+                # Normalize title for API (remove accents)
+                normalized_title = normalize_text(title)
+                data = await client.search_datasets_by_title(normalized_title, pagination)
+
+                # If keyword is provided, also search by keyword as title and combine results
+                # This helps find datasets where both terms appear in the title
+                if keyword:
+                    normalized_keyword = normalize_text(keyword)
+                    keyword_data = await client.search_datasets_by_title(normalized_keyword, pagination)
+                    keyword_items = keyword_data.get("result", {}).get("items", [])
+
+                    # Get existing items URIs to avoid duplicates
+                    existing_uris = {item.get("_about") for item in data.get("result", {}).get("items", [])}
+
+                    # Add keyword search results that aren't already in title results
+                    for item in keyword_items:
+                        if item.get("_about") not in existing_uris:
+                            data["result"]["items"].append(item)
+
+                local_filters = {"publisher": publisher, "theme": theme, "format": format, "keyword": keyword, "title": title}
 
         elif date_start and date_end:
             data = await client.get_datasets_by_date_range(date_start, date_end, pagination)
@@ -1193,7 +1286,9 @@ async def search_datasets(
             local_filters = {"publisher": publisher, "theme": theme, "keyword": keyword}
 
         elif keyword:
-            data = await client.get_datasets_by_keyword(keyword, pagination)
+            # Normalize keyword for API (remove accents)
+            normalized_keyword = normalize_text(keyword)
+            data = await client.get_datasets_by_keyword(normalized_keyword, pagination)
             local_filters = {"publisher": publisher, "theme": theme, "format": format}
 
         else:
@@ -1210,6 +1305,7 @@ async def search_datasets(
                 local_filters.get("theme"),
                 local_filters.get("format"),
                 local_filters.get("keyword"),
+                local_filters.get("title"),
             )
             data["result"]["items"] = filtered_items
 
@@ -1811,7 +1907,9 @@ async def resource_keyword_datasets(keyword: str) -> str:
     """
     try:
         pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.get_datasets_by_keyword(keyword, pagination)
+        # Normalize keyword for API (remove accents)
+        normalized_keyword = normalize_text(keyword)
+        data = await client.get_datasets_by_keyword(normalized_keyword, pagination)
         return _format_response(data, "dataset")
     except Exception as e:
         return _handle_error(e)

@@ -1836,8 +1836,50 @@ async def search_datasets(
             data = await client.get_datasets_by_date_range(date_start, date_end, pagination)
             local_filters = {"publisher": publisher, "theme": theme, "format": format, "keyword": keyword}
 
+        elif keyword and spatial_type and spatial_value:
+            # When keyword + spatial provided, use keyword search with translations
+            # then filter by spatial (more effective than spatial search + keyword filter)
+            normalized_keyword = normalize_text(keyword)
+
+            # Get keyword translations for bilingual regions
+            keywords_to_search = _get_keyword_translations(keyword, spatial_value)
+
+            all_items: list[dict[str, Any]] = []
+            existing_uris: set[str] = set()
+
+            for kw in keywords_to_search:
+                kw_normalized = normalize_text(kw)
+
+                # Search by keyword endpoint
+                try:
+                    kw_data = await client.get_datasets_by_keyword(kw_normalized, pagination)
+                    for item in kw_data.get("result", {}).get("items", []):
+                        uri = item.get("_about")
+                        if uri not in existing_uris:
+                            all_items.append(item)
+                            existing_uris.add(uri)
+                except Exception:
+                    pass
+
+                # Also search by title endpoint
+                try:
+                    title_data = await client.search_datasets_by_title(kw_normalized, pagination)
+                    for item in title_data.get("result", {}).get("items", []):
+                        uri = item.get("_about")
+                        if uri not in existing_uris:
+                            all_items.append(item)
+                            existing_uris.add(uri)
+                except Exception:
+                    pass
+
+            # Filter by spatial
+            filtered_items = _filter_by_spatial(all_items, spatial_value)
+
+            data = {"result": {"items": filtered_items, "page": 0, "itemsPerPage": len(filtered_items)}}
+            local_filters = {"publisher": publisher, "theme": theme, "format": format}
+
         elif spatial_type and spatial_value:
-            # Normalize spatial name (e.g., Bizkaia -> Vizcaya) and get variants
+            # Spatial-only search (no keyword)
             variants, related_autonomy = _normalize_spatial_name(spatial_value, spatial_type)
 
             # Try each variant until we get results

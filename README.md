@@ -3,7 +3,6 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 
 Servidor MCP (Model Context Protocol) para acceder al catalogo de datos abiertos de Espana a traves de la API de **datos.gob.es**, con integraciones adicionales para **INE**, **AEMET** y **BOE**.
 
@@ -24,7 +23,6 @@ Este servidor MCP permite a asistentes de IA como Claude, ChatGPT y otros client
 - **Busqueda semantica**: Busqueda por significado usando embeddings
 - Cliente HTTP asincrono con manejo robusto de errores
 - Modelos Pydantic para tipado seguro
-- **Docker ready**: Dockerfile y docker-compose incluidos
 - Listo para desplegar en FastMCP Cloud
 
 ## Instalacion
@@ -33,7 +31,6 @@ Este servidor MCP permite a asistentes de IA como Claude, ChatGPT y otros client
 
 - Python 3.10 o superior
 - pip
-- (Opcional) Docker
 
 ### Instalacion rapida
 
@@ -55,16 +52,6 @@ source .venv/bin/activate
 
 # Instalar dependencias
 pip install -r requirements.txt
-```
-
-### Instalacion con Docker
-
-```bash
-# Construir imagen
-make docker-build
-
-# Ejecutar
-make docker-run
 ```
 
 ## Configuracion
@@ -98,9 +85,6 @@ make run-stdio
 
 # O directamente
 mcp run server.py
-
-# Con Docker
-docker run -it --rm datos-gob-es-mcp
 ```
 
 ### Inspeccionar herramientas disponibles
@@ -266,19 +250,6 @@ Anade a tu archivo de configuracion `claude_desktop_config.json`:
 }
 ```
 
-### Con Docker
-
-```json
-{
-  "mcpServers": {
-    "datos-gob-es": {
-      "command": "docker",
-      "args": ["run", "-i", "--rm", "-e", "AEMET_API_KEY=tu_key", "datos-gob-es-mcp"]
-    }
-  }
-}
-```
-
 ## Desarrollo
 
 ### Comandos disponibles
@@ -293,8 +264,6 @@ make test          # Ejecutar tests
 make lint          # Verificar codigo con ruff
 make format        # Formatear codigo con ruff
 make clean         # Limpiar archivos de cache
-make docker-build  # Construir imagen Docker
-make docker-run    # Ejecutar con Docker
 make notebooks     # Iniciar servidor Jupyter
 ```
 
@@ -324,8 +293,6 @@ datos-gob-es-mcp/
 ├── tests/                    # Tests automatizados
 ├── docs/                     # Documentacion adicional
 │   └── DEPLOYMENT.md        # Guia de despliegue
-├── Dockerfile               # Imagen Docker
-├── docker-compose.yml       # Orquestacion Docker
 ├── requirements.txt         # Dependencias Python
 ├── Makefile                 # Comandos de desarrollo
 └── README.md
@@ -339,44 +306,6 @@ datos-gob-es-mcp/
 | INE | No | [ine.es/dyngs/DataLab](https://www.ine.es/dyngs/DataLab/es/manual.html) |
 | AEMET | Si (gratis) | [opendata.aemet.es](https://opendata.aemet.es/dist/index.html) |
 | BOE | No | [boe.es/datosabiertos](https://www.boe.es/datosabiertos/) |
-
-## Docker
-
-### Comandos Docker disponibles
-
-```bash
-make docker-build  # Construir imagen
-make docker-up     # Iniciar en background
-make docker-down   # Parar contenedores
-make docker-run    # Ejecutar interactivo
-make docker-test   # Verificar que funciona
-make docker-dev    # Modo desarrollo
-make docker-logs   # Ver logs
-make docker-clean  # Limpiar todo
-```
-
-### Construir y ejecutar manualmente
-
-```bash
-# Construir
-docker-compose build
-
-# Ejecutar
-docker run -it --rm --env-file .env datos-gob-es-mcp_mcp-server
-```
-
-### Docker Compose
-
-```bash
-# Crear archivo .env con tus API keys
-cp .env.example .env
-
-# Iniciar en background
-docker-compose up -d
-
-# Ver logs
-docker-compose logs -f mcp-server
-```
 
 ## Licencia
 

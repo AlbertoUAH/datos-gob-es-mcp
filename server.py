@@ -65,14 +65,23 @@ class DatasetSummary(BaseModel):
     """Simplified dataset representation for responses."""
 
     uri: str
+    id: str | None = None  # Short dataset ID extracted from URI
     title: str | list[str] | None = None
     description: str | list[str] | None = None
     publisher: str | dict[str, Any] | None = None
+    publisher_name: str | None = None  # Human-readable publisher name
     theme: list[str] | str | None = None
     keywords: list[str] | None = None
     issued: str | None = None
     modified: str | None = None
+    frequency: str | None = None  # Update frequency (accrualPeriodicity)
+    language: list[str] | None = None  # Available languages
+    spatial: str | None = None  # Geographic coverage
+    license: str | None = None  # License information
+    formats: list[str] | None = None  # Available formats (csv, json, etc.)
+    access_url: str | None = None  # Main download URL
     distributions_count: int = 0
+    preview: "DataPreview | None" = None  # Data preview (first 10 rows)
 
     @classmethod
     def from_api_item(cls, item: dict[str, Any], lang: str | None = "es") -> "DatasetSummary":
@@ -98,17 +107,220 @@ class DatasetSummary(BaseModel):
 
         keywords = cls._extract_keywords(item.get("keyword", []), lang)
 
+        # Extract dataset ID from URI
+        uri = item.get("_about", "")
+        dataset_id = uri.split("/")[-1] if uri else None
+
+        # Extract publisher name
+        publisher = item.get("publisher")
+        publisher_name = cls._extract_publisher_name(publisher)
+
+        # Extract frequency (accrualPeriodicity)
+        frequency = cls._extract_frequency(item.get("accrualPeriodicity"))
+
+        # Extract languages
+        language = cls._extract_languages(item.get("language"))
+
+        # Extract spatial coverage
+        spatial = cls._extract_spatial(item.get("spatial"))
+
+        # Extract license
+        license_val = cls._extract_license(item.get("license"))
+
+        # Extract formats and access_url from distributions
+        formats, access_url = cls._extract_distribution_info(distributions)
+
         return cls(
-            uri=item.get("_about", ""),
+            uri=uri,
+            id=dataset_id,
             title=title,
             description=description,
-            publisher=item.get("publisher"),
+            publisher=publisher,
+            publisher_name=publisher_name,
             theme=theme,
             keywords=keywords,
             issued=item.get("issued"),
             modified=item.get("modified"),
+            frequency=frequency,
+            language=language,
+            spatial=spatial,
+            license=license_val,
+            formats=formats,
+            access_url=access_url,
             distributions_count=len(distributions) if distributions else 0,
         )
+
+    @staticmethod
+    def _extract_publisher_name(publisher: Any) -> str | None:
+        """Extract human-readable publisher name."""
+        if publisher is None:
+            return None
+        if isinstance(publisher, str):
+            # Try to extract from URL format
+            if "/" in publisher:
+                return publisher.split("/")[-1]
+            return publisher
+        if isinstance(publisher, dict):
+            # Try common keys for publisher name
+            for key in ["name", "title", "_value", "label"]:
+                if key in publisher:
+                    val = publisher[key]
+                    if isinstance(val, dict):
+                        return val.get("_value")
+                    return val
+            # Fallback to _about and extract last part
+            about = publisher.get("_about", "")
+            if about:
+                return about.split("/")[-1]
+        return None
+
+    @staticmethod
+    def _extract_frequency(value: Any) -> str | None:
+        """Extract update frequency from accrualPeriodicity field."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            # Extract from URI format (e.g., http://purl.org/cld/freq/annual)
+            if "/" in value:
+                return value.split("/")[-1]
+            return value
+        if isinstance(value, dict):
+            about = value.get("_about", "")
+            if about and "/" in about:
+                return about.split("/")[-1]
+            return value.get("_value") or value.get("label")
+        return None
+
+    @staticmethod
+    def _extract_languages(value: Any) -> list[str] | None:
+        """Extract language codes from language field."""
+        if value is None:
+            return None
+        languages = []
+        if isinstance(value, str):
+            # Extract from URI format
+            if "/" in value:
+                languages.append(value.split("/")[-1])
+            else:
+                languages.append(value)
+        elif isinstance(value, list):
+            for lang in value:
+                if isinstance(lang, str):
+                    if "/" in lang:
+                        languages.append(lang.split("/")[-1])
+                    else:
+                        languages.append(lang)
+                elif isinstance(lang, dict):
+                    about = lang.get("_about", "")
+                    if about and "/" in about:
+                        languages.append(about.split("/")[-1])
+        return languages if languages else None
+
+    @staticmethod
+    def _extract_spatial(value: Any) -> str | None:
+        """Extract geographic coverage from spatial field."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            # Extract from URI format
+            if "/" in value:
+                return value.split("/")[-1]
+            return value
+        if isinstance(value, dict):
+            about = value.get("_about", "")
+            if about and "/" in about:
+                return about.split("/")[-1]
+            return value.get("_value") or value.get("label")
+        if isinstance(value, list) and value:
+            # Return first spatial coverage
+            first = value[0]
+            if isinstance(first, str):
+                return first.split("/")[-1] if "/" in first else first
+            if isinstance(first, dict):
+                about = first.get("_about", "")
+                if about:
+                    return about.split("/")[-1]
+        return None
+
+    @staticmethod
+    def _extract_license(value: Any) -> str | None:
+        """Extract license information."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            # Try to get label or URI
+            label = value.get("label") or value.get("_value") or value.get("title")
+            if label:
+                return label
+            about = value.get("_about", "")
+            if about:
+                return about
+        return None
+
+    @staticmethod
+    def _extract_distribution_info(distributions: list) -> tuple[list[str] | None, str | None]:
+        """Extract formats and primary access URL from distributions."""
+        if not distributions:
+            return None, None
+
+        formats = set()
+        access_url = None
+
+        for dist in distributions:
+            if not isinstance(dist, dict):
+                continue
+
+            # Extract format
+            fmt = dist.get("format")
+            if isinstance(fmt, dict):
+                fmt = fmt.get("value") or fmt.get("_value")
+            elif isinstance(fmt, list) and fmt:
+                f = fmt[0]
+                fmt = f.get("value") if isinstance(f, dict) else f
+
+            if fmt:
+                # Normalize format names
+                fmt_lower = fmt.lower()
+                if "csv" in fmt_lower or "comma-separated" in fmt_lower:
+                    formats.add("CSV")
+                elif "json" in fmt_lower:
+                    formats.add("JSON")
+                elif "xml" in fmt_lower:
+                    formats.add("XML")
+                elif "xls" in fmt_lower or "excel" in fmt_lower or "spreadsheet" in fmt_lower:
+                    formats.add("Excel")
+                elif "pdf" in fmt_lower:
+                    formats.add("PDF")
+                elif "rdf" in fmt_lower:
+                    formats.add("RDF")
+                elif "html" in fmt_lower:
+                    formats.add("HTML")
+                elif "api" in fmt_lower:
+                    formats.add("API")
+                elif "zip" in fmt_lower:
+                    formats.add("ZIP")
+                elif "shp" in fmt_lower or "shapefile" in fmt_lower:
+                    formats.add("Shapefile")
+                elif "geojson" in fmt_lower:
+                    formats.add("GeoJSON")
+                elif "tsv" in fmt_lower or "tab-separated" in fmt_lower:
+                    formats.add("TSV")
+                elif "txt" in fmt_lower or "text/plain" in fmt_lower:
+                    formats.add("TXT")
+                else:
+                    # Clean up the format name
+                    clean_fmt = fmt.split("/")[-1] if "/" in fmt else fmt
+                    formats.add(clean_fmt.upper() if len(clean_fmt) <= 5 else clean_fmt.title())
+
+            # Get first access URL (prefer CSV or JSON for preview)
+            if access_url is None:
+                url = dist.get("accessURL")
+                if url:
+                    access_url = url
+
+        return list(formats) if formats else None, access_url
 
     @staticmethod
     def _extract_keywords(value: Any, lang: str | None = None) -> list[str] | None:
@@ -846,16 +1058,20 @@ def _normalize_format(format_str: str | None, media_type: str | None) -> str | N
     """Normalize format string to a standard format identifier."""
     if format_str:
         fmt_lower = format_str.lower()
-        if "csv" in fmt_lower or fmt_lower == "text/csv":
+        if "csv" in fmt_lower or fmt_lower == "text/csv" or "comma-separated" in fmt_lower:
             return "csv"
         if "json" in fmt_lower or fmt_lower == "application/json":
             return "json"
+        if "tsv" in fmt_lower or "tab-separated" in fmt_lower:
+            return "tsv"
     if media_type:
         mt_lower = media_type.lower()
         if "csv" in mt_lower:
             return "csv"
         if "json" in mt_lower:
             return "json"
+        if "tab-separated" in mt_lower:
+            return "tsv"
     return None
 
 
@@ -977,11 +1193,12 @@ async def _fetch_data_preview(
     """Fetch and parse data preview from a distribution URL."""
     normalized_format = _normalize_format(format_str, media_type)
 
-    if normalized_format not in ("csv", "json"):
+    if normalized_format not in ("csv", "json", "tsv"):
         return None  # Unsupported format
 
     try:
-        async with httpx.AsyncClient(timeout=PREVIEW_TIMEOUT) as http_client:
+        # Use follow_redirects to handle 301/302 redirects
+        async with httpx.AsyncClient(timeout=PREVIEW_TIMEOUT, follow_redirects=True) as http_client:
             async with http_client.stream("GET", access_url) as response:
                 response.raise_for_status()
 
@@ -1002,8 +1219,11 @@ async def _fetch_data_preview(
                 except UnicodeDecodeError:
                     content = content_bytes.decode("latin-1", errors="replace")
 
-        if normalized_format == "csv":
-            return _parse_csv_preview(content, max_rows)
+        if normalized_format in ("csv", "tsv"):
+            preview = _parse_csv_preview(content, max_rows)
+            if normalized_format == "tsv":
+                preview.format = "tsv"
+            return preview
         elif normalized_format == "json":
             return _parse_json_preview(content, max_rows)
 
@@ -1061,6 +1281,92 @@ async def _format_response_with_preview(data: dict[str, Any], preview_rows: int)
         distributions.append(dist.model_dump(exclude_none=True))
 
     output["distributions"] = distributions
+    return json.dumps(output, ensure_ascii=False, indent=2)
+
+
+async def _add_preview_to_dataset(
+    dataset: DatasetSummary,
+    item: dict[str, Any],
+    max_rows: int = 10,
+) -> DatasetSummary:
+    """Add data preview to a dataset by fetching its first downloadable distribution.
+
+    Prioritizes CSV and JSON formats for preview.
+    """
+    distributions = item.get("distribution", [])
+    if isinstance(distributions, dict):
+        distributions = [distributions]
+
+    if not distributions:
+        return dataset
+
+    # Sort distributions to prioritize CSV, then JSON
+    def format_priority(dist: dict) -> int:
+        fmt = dist.get("format", "")
+        if isinstance(fmt, dict):
+            fmt = fmt.get("value", "") or fmt.get("_value", "")
+        elif isinstance(fmt, list) and fmt:
+            f = fmt[0]
+            fmt = f.get("value", "") if isinstance(f, dict) else str(f)
+        fmt_lower = str(fmt).lower()
+        if "csv" in fmt_lower:
+            return 0
+        if "json" in fmt_lower:
+            return 1
+        return 99
+
+    sorted_dists = sorted(distributions, key=format_priority)
+
+    # Try to get preview from first suitable distribution
+    for dist in sorted_dists:
+        access_url = dist.get("accessURL")
+        if not access_url:
+            continue
+
+        fmt = dist.get("format", "")
+        if isinstance(fmt, dict):
+            fmt = fmt.get("value", "") or fmt.get("_value", "")
+        elif isinstance(fmt, list) and fmt:
+            f = fmt[0]
+            fmt = f.get("value", "") if isinstance(f, dict) else str(f)
+
+        media_type = dist.get("mediaType", "")
+        if isinstance(media_type, dict):
+            media_type = media_type.get("value", "") or media_type.get("_value", "")
+
+        # Check if format is supported for preview
+        normalized = _normalize_format(fmt, media_type)
+        if normalized in ("csv", "json", "tsv"):
+            preview = await _fetch_data_preview(access_url, fmt, media_type, max_rows)
+            if preview and not preview.error:
+                dataset.preview = preview
+                break
+
+    return dataset
+
+
+async def _format_response_with_dataset_preview(
+    data: dict[str, Any],
+    lang: str | None = "es",
+    preview_rows: int = 10,
+) -> str:
+    """Format API response with data previews for datasets."""
+    result = data.get("result", {})
+    items = result.get("items", [])
+
+    output: dict[str, Any] = {
+        "total_in_page": len(items),
+        "page": result.get("page", 0),
+        "items_per_page": result.get("itemsPerPage", 10),
+    }
+
+    datasets = []
+    for item in items:
+        dataset = DatasetSummary.from_api_item(item, lang)
+        dataset = await _add_preview_to_dataset(dataset, item, preview_rows)
+        datasets.append(dataset.model_dump(exclude_none=True))
+
+    output["datasets"] = datasets
     return json.dumps(output, ensure_ascii=False, indent=2)
 
 
@@ -1153,11 +1459,17 @@ async def search_datasets(
     lang: str | None = "es",
     fetch_all: bool = False,
     max_results: int = 2000,
+    include_preview: bool = True,
+    preview_rows: int = 10,
 ) -> str:
     """Search and filter datasets from the Spanish open data catalog.
 
     All filter parameters are optional and can be combined. When multiple filters
     are provided, the API query uses one filter and results are filtered locally.
+
+    Response includes enriched metadata: id, publisher_name, frequency, language,
+    spatial, license, formats, and access_url. By default, includes a data preview
+    (first 10 rows) for datasets with CSV/JSON/TSV formats.
 
     Args:
         title: Search text in dataset titles.
@@ -1174,9 +1486,11 @@ async def search_datasets(
         lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'. Use None for all.
         fetch_all: If True, fetches all pages automatically up to max_results.
         max_results: Maximum results when fetch_all=True (default 2000, max 10000).
+        include_preview: Include data preview (first rows) for CSV/JSON/TSV datasets. Default True.
+        preview_rows: Number of preview rows (default 10, max 50). Only used if include_preview=True.
 
     Returns:
-        JSON with matching datasets.
+        JSON with matching datasets including metadata and data preview.
     """
     try:
         max_results = min(max_results, 10000)  # Safety limit
@@ -1217,31 +1531,34 @@ async def search_datasets(
 
                 if fetch_all:
                     all_filtered_items = all_filtered_items[:max_results]
+                    items_to_process = all_filtered_items
                     output = {
                         "total_results": len(all_filtered_items),
                         "fetch_all": True,
                         "exact_match": True,
-                        "datasets": [
-                            DatasetSummary.from_api_item(item, lang).model_dump(exclude_none=True)
-                            for item in all_filtered_items
-                        ],
                     }
                 else:
                     start_idx = page * DEFAULT_PAGE_SIZE
                     end_idx = start_idx + DEFAULT_PAGE_SIZE
-                    paginated_items = all_filtered_items[start_idx:end_idx]
-
+                    items_to_process = all_filtered_items[start_idx:end_idx]
                     output = {
-                        "total_in_page": len(paginated_items),
+                        "total_in_page": len(items_to_process),
                         "total_exact_matches": len(all_filtered_items),
                         "page": page,
                         "items_per_page": DEFAULT_PAGE_SIZE,
                         "exact_match": True,
-                        "datasets": [
-                            DatasetSummary.from_api_item(item, lang).model_dump(exclude_none=True)
-                            for item in paginated_items
-                        ],
                     }
+
+                # Build datasets with optional preview
+                datasets = []
+                preview_rows_limit = min(max(1, preview_rows), 50) if include_preview else 0
+                for item in items_to_process:
+                    dataset = DatasetSummary.from_api_item(item, lang)
+                    if include_preview:
+                        dataset = await _add_preview_to_dataset(dataset, item, preview_rows_limit)
+                    datasets.append(dataset.model_dump(exclude_none=True))
+                output["datasets"] = datasets
+
                 return json.dumps(output, ensure_ascii=False, indent=2)
             else:
                 # Normalize title for API (remove accents)
@@ -1309,7 +1626,15 @@ async def search_datasets(
             )
             data["result"]["items"] = filtered_items
 
-        return _format_response(data, "dataset", lang) if data else json.dumps({"error": "No data"})
+        if not data:
+            return json.dumps({"error": "No data"})
+
+        # Return with preview if requested
+        if include_preview:
+            preview_rows = min(max(1, preview_rows), 50)  # Limit to 1-50 rows
+            return await _format_response_with_dataset_preview(data, lang, preview_rows)
+
+        return _format_response(data, "dataset", lang)
 
     except Exception as e:
         return _handle_error(e)

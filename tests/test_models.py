@@ -50,7 +50,7 @@ class TestDatasetSummary:
         assert summary.distributions_count == 2
 
     def test_from_api_item_with_list_title(self):
-        """Test parsing when title is a list."""
+        """Test parsing when title is a list - default lang=es filters to Spanish."""
         item = {
             "_about": "test-uri",
             "title": [
@@ -58,7 +58,21 @@ class TestDatasetSummary:
                 {"_value": "Title 2", "_lang": "en"}
             ]
         }
+        # Default lang="es" filters to Spanish title only
         summary = DatasetSummary.from_api_item(item)
+        assert summary.title == "Title 1"
+
+    def test_from_api_item_with_list_title_all_languages(self):
+        """Test parsing when title is a list - lang=None returns all titles."""
+        item = {
+            "_about": "test-uri",
+            "title": [
+                {"_value": "Title 1", "_lang": "es"},
+                {"_value": "Title 2", "_lang": "en"}
+            ]
+        }
+        # lang=None returns all titles
+        summary = DatasetSummary.from_api_item(item, lang=None)
         assert summary.title == ["Title 1", "Title 2"]
 
     def test_from_api_item_with_string_title(self):

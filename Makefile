@@ -1,4 +1,4 @@
-.PHONY: install dev run test test-cov lint format clean help inspect venv
+.PHONY: install dev run test test-cov lint format clean help inspect venv docker-build docker-up docker-down docker-run docker-test docker-dev docker-logs docker-clean notebooks
 
 # Default Python interpreter
 PYTHON ?= python3
@@ -56,3 +56,33 @@ clean:  ## Clean up cache and build files
 ci:  ## Run full CI pipeline (lint + test)
 	$(MAKE) lint
 	$(MAKE) test
+
+# Docker targets
+docker-build:  ## Build Docker image with docker-compose
+	docker-compose build
+
+docker-up:  ## Start MCP server in Docker (background)
+	docker-compose up -d
+
+docker-down:  ## Stop Docker containers
+	docker-compose down
+
+docker-run:  ## Run MCP server in Docker (interactive)
+	docker run --rm -it --env-file .env datos-gob-es-mcp_mcp-server
+
+docker-test:  ## Test that Docker image works
+	docker run --rm --env-file .env datos-gob-es-mcp_mcp-server python -c "import server; print('✓ Server OK')"
+
+docker-dev:  ## Run development server with Docker Compose
+	docker-compose --profile dev up mcp-dev
+
+docker-logs:  ## Show Docker container logs
+	docker-compose logs -f mcp-server
+
+docker-clean:  ## Remove Docker containers and volumes
+	docker-compose down -v --rmi local
+
+# Notebooks
+notebooks:  ## Start Jupyter notebook server for examples
+	$(VENV_PIP) install jupyter pandas matplotlib
+	$(VENV_PYTHON) -m jupyter notebook examples/

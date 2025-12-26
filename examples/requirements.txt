@@ -1,0 +1,20 @@
+# Requirements for running the example notebooks
+
+# Jupyter
+jupyter>=1.0.0
+notebook>=7.0.0
+ipykernel>=6.0.0
+
+# Data analysis
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# HTTP client for API examples
+httpx>=0.27.0
+
+# JSON handling
+json5>=0.9.0

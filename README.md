@@ -3,34 +3,39 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
 
-Servidor MCP (Model Context Protocol) para acceder al catálogo de datos abiertos de España a través de la API de **datos.gob.es**.
+Servidor MCP (Model Context Protocol) para acceder al catalogo de datos abiertos de Espana a traves de la API de **datos.gob.es**, con integraciones adicionales para **INE**, **AEMET** y **BOE**.
 
-## Descripción
+## Descripcion
 
-Este servidor MCP permite a asistentes de IA como Claude, ChatGPT y otros clientes compatibles con MCP buscar y explorar los miles de datasets públicos disponibles en el portal de datos abiertos del Gobierno de España.
+Este servidor MCP permite a asistentes de IA como Claude, ChatGPT y otros clientes compatibles con MCP buscar y explorar los miles de datasets publicos disponibles en el portal de datos abiertos del Gobierno de Espana.
 
-### Características
+### Caracteristicas
 
-- **22 herramientas MCP** para consultar la API de datos.gob.es
-- **13 recursos MCP** (9 estáticos + 4 templates dinámicos) para acceso directo a datos
-- **4 prompts MCP** para guías de búsqueda detalladas
-- Búsqueda de datasets por título, temática, publicador, formato, keywords y más
-- Acceso a distribuciones (archivos descargables) de los datasets
-- Consulta de metadatos: publicadores, temáticas, cobertura geográfica
-- Información territorial según la Norma Técnica de Interoperabilidad (NTI)
-- Cliente HTTP asíncrono con manejo robusto de errores
+- **35+ herramientas MCP** para consultar multiples APIs de datos publicos
+- **13 recursos MCP** (9 estaticos + 4 templates dinamicos) para acceso directo a datos
+- **4 prompts MCP** para guias de busqueda detalladas
+- **Integraciones externas**:
+  - **INE**: Estadisticas oficiales de Espana
+  - **AEMET**: Datos meteorologicos (requiere API key gratuita)
+  - **BOE**: Boletin Oficial del Estado
+- **Sistema de notificaciones**: Webhooks para detectar cambios en datasets
+- **Busqueda semantica**: Busqueda por significado usando embeddings
+- Cliente HTTP asincrono con manejo robusto de errores
 - Modelos Pydantic para tipado seguro
+- **Docker ready**: Dockerfile y docker-compose incluidos
 - Listo para desplegar en FastMCP Cloud
 
-## Instalación
+## Instalacion
 
 ### Requisitos
 
 - Python 3.10 o superior
 - pip
+- (Opcional) Docker
 
-### Instalación rápida
+### Instalacion rapida
 
 ```bash
 # Clonar el repositorio
@@ -41,7 +46,7 @@ cd datos-gob-es-mcp
 make dev
 ```
 
-### Instalación manual
+### Instalacion manual
 
 ```bash
 # Crear entorno virtual
@@ -51,6 +56,37 @@ source .venv/bin/activate
 # Instalar dependencias
 pip install -r requirements.txt
 ```
+
+### Instalacion con Docker
+
+```bash
+# Construir imagen
+make docker-build
+
+# Ejecutar
+make docker-run
+```
+
+## Configuracion
+
+### Variables de entorno
+
+Crea un archivo `.env` basandote en `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
+| Variable | Requerida | Descripcion |
+|----------|-----------|-------------|
+| `AEMET_API_KEY` | Para meteorologia | API key de AEMET OpenData ([obtener gratis](https://opendata.aemet.es/centrodedescargas/altaUsuario)) |
+| `WEBHOOK_SECRET` | No | Secreto para validar firmas de webhooks |
+| `LOG_LEVEL` | No | Nivel de logging: DEBUG, INFO, WARNING, ERROR (default: INFO) |
+| `LOG_FORMAT` | No | Formato de logs: console o json (default: console) |
+| `RATE_LIMIT_DATOS_GOB_ES` | No | Peticiones/segundo a datos.gob.es (default: 10) |
+| `RATE_LIMIT_INE` | No | Peticiones/segundo a INE (default: 5) |
+| `RATE_LIMIT_AEMET` | No | Peticiones/segundo a AEMET (default: 10) |
+| `RATE_LIMIT_BOE` | No | Peticiones/segundo a BOE (default: 10) |
 
 ## Uso
 
@@ -62,6 +98,9 @@ make run-stdio
 
 # O directamente
 mcp run server.py
+
+# Con Docker
+docker run -it --rm datos-gob-es-mcp
 ```
 
 ### Inspeccionar herramientas disponibles
@@ -72,213 +111,169 @@ make inspect
 
 ## Capacidades MCP
 
-Este servidor implementa las tres capacidades principales del Model Context Protocol:
-
-| Capacidad | Cantidad | Descripción |
+| Capacidad | Cantidad | Descripcion |
 |-----------|----------|-------------|
-| **Tools** | 22 | Funciones que el LLM puede invocar |
-| **Resources** | 13 | Datos estáticos y dinámicos accesibles |
-| **Prompts** | 4 | Guías de búsqueda predefinidas |
+| **Tools** | 35+ | Funciones que el LLM puede invocar |
+| **Resources** | 13 | Datos estaticos y dinamicos accesibles |
+| **Prompts** | 4 | Guias de busqueda predefinidas |
 
 ---
 
 ## Tools (Herramientas)
 
-Las herramientas permiten al asistente de IA realizar operaciones activas sobre la API.
+### Datasets - datos.gob.es (5 herramientas principales)
 
-### Datasets (9 herramientas)
-
-| Herramienta | Descripción |
+| Herramienta | Descripcion |
 |-------------|-------------|
-| `list_datasets` | Listar datasets con paginación y ordenación |
+| `list_datasets` | Listar datasets con paginacion y ordenacion |
 | `get_dataset` | Obtener un dataset por su ID |
-| `search_datasets_by_title` | Buscar datasets por texto en el título |
-| `get_datasets_by_publisher` | Filtrar datasets por publicador/organismo |
-| `get_datasets_by_theme` | Filtrar datasets por temática (economía, salud, etc.) |
-| `get_datasets_by_format` | Filtrar datasets por formato (CSV, JSON, XML, etc.) |
-| `get_datasets_by_keyword` | Filtrar datasets por palabra clave/etiqueta |
-| `get_datasets_by_spatial` | Filtrar datasets por ámbito geográfico |
-| `get_datasets_by_date_range` | Filtrar datasets modificados en un rango de fechas |
-
-### Distribuciones (3 herramientas)
-
-| Herramienta | Descripción |
-|-------------|-------------|
-| `list_distributions` | Listar todas las distribuciones (archivos) |
-| `get_distributions_by_dataset` | Obtener archivos descargables de un dataset |
-| `get_distributions_by_format` | Filtrar distribuciones por formato |
+| `search_datasets` | Busqueda unificada con multiples filtros |
+| `semantic_search` | Busqueda por significado usando IA |
+| `get_distributions` | Obtener archivos descargables |
 
 ### Metadatos (3 herramientas)
 
-| Herramienta | Descripción |
+| Herramienta | Descripcion |
 |-------------|-------------|
 | `list_publishers` | Listar todos los publicadores (organismos) |
-| `list_themes` | Listar todas las temáticas/categorías |
-| `list_spatial_coverage` | Listar opciones de cobertura geográfica |
+| `list_themes` | Listar todas las tematicas/categorias |
+| `list_spatial_coverage` | Listar opciones de cobertura geografica |
 
-### NTI - Norma Técnica de Interoperabilidad (7 herramientas)
+### NTI - Norma Tecnica de Interoperabilidad (7 herramientas)
 
-| Herramienta | Descripción |
+| Herramienta | Descripcion |
 |-------------|-------------|
-| `list_public_sectors` | Listar sectores públicos |
-| `get_public_sector` | Obtener un sector público por ID |
-| `list_provinces` | Listar provincias españolas |
+| `list_public_sectors` | Listar sectores publicos |
+| `get_public_sector` | Obtener un sector publico por ID |
+| `list_provinces` | Listar provincias espanolas |
 | `get_province` | Obtener una provincia por nombre |
-| `list_autonomous_regions` | Listar Comunidades Autónomas |
-| `get_autonomous_region` | Obtener una Comunidad Autónoma por ID |
-| `get_country_spain` | Obtener información de España |
+| `list_autonomous_regions` | Listar Comunidades Autonomas |
+| `get_autonomous_region` | Obtener una Comunidad Autonoma por ID |
+| `get_country_spain` | Obtener informacion de Espana |
+
+### INE - Instituto Nacional de Estadistica (4 herramientas)
+
+| Herramienta | Descripcion |
+|-------------|-------------|
+| `ine_search_operations` | Buscar operaciones estadisticas |
+| `ine_list_operations` | Listar todas las operaciones |
+| `ine_list_tables` | Listar tablas de una operacion |
+| `ine_get_data` | Obtener datos de una tabla |
+
+### AEMET - Meteorologia (4 herramientas)
+
+Requiere `AEMET_API_KEY` configurada.
+
+| Herramienta | Descripcion |
+|-------------|-------------|
+| `aemet_get_forecast` | Prevision meteorologica por municipio |
+| `aemet_get_observations` | Observaciones actuales de estaciones |
+| `aemet_list_stations` | Listar estaciones meteorologicas |
+| `aemet_list_municipalities` | Listar municipios con datos |
+
+### BOE - Boletin Oficial del Estado (4 herramientas)
+
+| Herramienta | Descripcion |
+|-------------|-------------|
+| `boe_get_summary` | Sumario del BOE de una fecha |
+| `boe_get_document` | Obtener un documento especifico |
+| `boe_search` | Buscar en el BOE |
+| `boe_get_today` | Obtener el BOE de hoy |
+
+### Webhooks y Notificaciones (6 herramientas)
+
+| Herramienta | Descripcion |
+|-------------|-------------|
+| `webhook_register` | Registrar webhook para notificaciones |
+| `webhook_list` | Listar webhooks registrados |
+| `webhook_delete` | Eliminar un webhook |
+| `webhook_test` | Probar un webhook |
+| `check_dataset_changes` | Verificar cambios en un dataset |
+| `list_watched_datasets` | Listar datasets vigilados |
 
 ---
 
 ## Resources (Recursos)
 
-Los recursos proporcionan acceso directo a datos sin necesidad de invocar herramientas.
+### Recursos Estaticos
 
-### Recursos Estáticos (9)
-
-| URI | Descripción |
+| URI | Descripcion |
 |-----|-------------|
-| `catalog://overview` | Resumen general del catálogo con estadísticas |
-| `catalog://themes` | Lista de todas las temáticas disponibles |
+| `catalog://themes` | Lista de todas las tematicas disponibles |
 | `catalog://publishers` | Lista de todos los organismos publicadores |
-| `catalog://formats` | Formatos de datos disponibles (CSV, JSON, XML, etc.) |
-| `catalog://spatial` | Opciones de cobertura geográfica |
-| `catalog://provinces` | Lista de provincias españolas |
-| `catalog://autonomous-regions` | Lista de Comunidades Autónomas |
-| `catalog://public-sectors` | Sectores públicos según NTI |
-| `catalog://keywords` | Palabras clave más utilizadas |
+| `catalog://provinces` | Lista de provincias espanolas |
+| `catalog://autonomous-regions` | Lista de Comunidades Autonomas |
 
-### Resource Templates Dinámicos (4)
+### Resource Templates Dinamicos
 
-| URI Template | Descripción | Ejemplo |
+| URI Template | Descripcion | Ejemplo |
 |--------------|-------------|---------|
-| `dataset://{dataset_id}` | Información completa de un dataset | `dataset://l01280066-presupuestos-2024` |
-| `theme://{theme_id}` | Datasets de una temática específica | `theme://economia` |
-| `publisher://{publisher_id}` | Datasets de un publicador específico | `publisher://E00003901` |
-| `format://{format_id}` | Datasets en un formato específico | `format://csv` |
+| `dataset://{dataset_id}` | Informacion de un dataset | `dataset://l01280066-presupuestos` |
+| `theme://{theme_id}` | Datasets de una tematica | `theme://economia` |
+| `publisher://{publisher_id}` | Datasets de un publicador | `publisher://E00003901` |
+| `format://{format_id}` | Datasets en un formato | `format://csv` |
 | `keyword://{keyword}` | Datasets con una palabra clave | `keyword://presupuestos` |
-
-### Uso de Resources
-
-Los resources se pueden usar directamente en conversaciones:
-
-```
-Usuario: Dame información sobre el catálogo
-Asistente: [Lee catalog://overview]
-
-Usuario: ¿Qué datasets hay sobre economía?
-Asistente: [Lee theme://economia]
-
-Usuario: Muéstrame el dataset l01280066-presupuestos
-Asistente: [Lee dataset://l01280066-presupuestos]
-```
-
----
-
-## Prompts (Guías de Búsqueda)
-
-Los prompts proporcionan guías detalladas para tareas complejas de búsqueda y análisis.
-
-### Prompts Disponibles (4)
-
-| Prompt | Parámetros | Descripción |
-|--------|------------|-------------|
-| `prompt_buscar_datos_por_tema` | tema, formato, max_resultados | Guía para encontrar datasets de una temática en un formato específico |
-| `prompt_datasets_recientes` | dias, tema, max_resultados | Guía para encontrar datasets actualizados recientemente |
-| `prompt_explorar_catalogo` | interes | Guía completa de exploración del catálogo |
-| `prompt_analisis_dataset` | dataset_id, incluir_distribuciones, evaluar_calidad | Guía para análisis detallado de un dataset |
-
-### Ejemplo: Buscar datos por tema
-
-```
-Prompt: prompt_buscar_datos_por_tema(tema="salud", formato="csv", max_resultados=10)
-
-El prompt guiará al asistente para:
-1. Verificar la temática en catalog://themes
-2. Buscar datasets con get_datasets_by_theme
-3. Filtrar por formato CSV
-4. Obtener detalles de los datasets más relevantes
-```
-
-### Ejemplo: Analizar un dataset
-
-```
-Prompt: prompt_analisis_dataset(dataset_id="l01280066-presupuestos", evaluar_calidad=true)
-
-El prompt guiará al asistente para:
-1. Obtener metadatos completos del dataset
-2. Analizar las distribuciones disponibles
-3. Evaluar la calidad de los datos
-4. Identificar posibles casos de uso
-5. Sugerir datasets complementarios
-```
 
 ---
 
 ## Ejemplos de Uso
 
-### Buscar datasets sobre empleo
+### Buscar estadisticas del INE
 
 ```
-Usuario: Busca datasets relacionados con empleo
-Asistente: [Usa search_datasets_by_title("empleo")]
+Usuario: Busca estadisticas de empleo en el INE
+Asistente: [Usa ine_search_operations("empleo")]
 ```
 
-### Filtrar por temática
+### Obtener prevision meteorologica
 
 ```
-Usuario: ¿Qué datos hay disponibles sobre economía?
-Asistente: [Lee theme://economia o usa get_datasets_by_theme("economia")]
+Usuario: Cual es la prevision del tiempo para Madrid?
+Asistente: [Usa aemet_get_forecast("28079")]
 ```
 
-### Obtener archivos de un dataset
+### Consultar el BOE
 
 ```
-Usuario: Dame los archivos descargables del dataset de presupuestos
-Asistente: [Usa get_distributions_by_dataset("id-del-dataset")]
+Usuario: Que se publico en el BOE hoy?
+Asistente: [Usa boe_get_today()]
 ```
 
-### Exploración guiada
+### Configurar notificaciones
 
 ```
-Usuario: Quiero explorar datos sobre turismo en España
-Asistente: [Usa prompt_explorar_catalogo(interes="turismo en España")]
+Usuario: Avisame cuando cambie el dataset de presupuestos
+Asistente: [Usa webhook_register(webhook_url="https://mi-servidor.com/notify", dataset_id="presupuestos-2024")]
 ```
 
-### Análisis de dataset
-
-```
-Usuario: Analiza el dataset l01280066-presupuestos-2024
-Asistente: [Usa prompt_analisis_dataset(dataset_id="l01280066-presupuestos-2024")]
-```
-
-## Configuración en Clientes MCP
+## Configuracion en Clientes MCP
 
 ### Claude Desktop
 
-Añade a tu archivo de configuración `claude_desktop_config.json`:
+Anade a tu archivo de configuracion `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "datos-gob-es": {
       "command": "mcp",
-      "args": ["run", "/ruta/a/datos-gob-es-mcp/server.py"]
+      "args": ["run", "/ruta/a/datos-gob-es-mcp/server.py"],
+      "env": {
+        "AEMET_API_KEY": "tu_api_key_aqui"
+      }
     }
   }
 }
 ```
 
-### Cursor / VS Code
-
-Añade a la configuración MCP del editor:
+### Con Docker
 
 ```json
 {
-  "mcp.servers": {
+  "mcpServers": {
     "datos-gob-es": {
-      "command": "mcp",
-      "args": ["run", "/ruta/a/datos-gob-es-mcp/server.py"]
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "AEMET_API_KEY=tu_key", "datos-gob-es-mcp"]
     }
   }
 }
@@ -295,54 +290,97 @@ make run           # Ejecutar servidor
 make run-stdio     # Ejecutar en modo stdio
 make inspect       # Inspeccionar herramientas MCP
 make test          # Ejecutar tests
-make lint          # Verificar código con ruff
-make format        # Formatear código con ruff
-make clean         # Limpiar archivos de caché
+make lint          # Verificar codigo con ruff
+make format        # Formatear codigo con ruff
+make clean         # Limpiar archivos de cache
+make docker-build  # Construir imagen Docker
+make docker-run    # Ejecutar con Docker
+make notebooks     # Iniciar servidor Jupyter
 ```
 
 ### Estructura del proyecto
 
 ```
 datos-gob-es-mcp/
-├── server.py                 # Servidor MCP (tools + resources)
-├── prompts/                  # Guías de búsqueda MCP
-│   ├── __init__.py          # Registro de prompts
-│   ├── buscar_por_tema.py   # Búsqueda por temática y formato
-│   ├── datasets_recientes.py # Datasets actualizados recientemente
-│   ├── explorar_catalogo.py # Exploración guiada del catálogo
-│   └── analisis_dataset.py  # Análisis detallado de datasets
-├── requirements.txt          # Dependencias Python
-├── Makefile                  # Comandos de desarrollo
-├── MANUAL_API_DATOS.md       # Documentación de la API
+├── server.py                 # Servidor MCP principal
+├── core/                     # Modulo central
+│   ├── logging.py           # Logging estructurado (structlog)
+│   ├── ratelimit.py         # Rate limiting (aiolimiter)
+│   └── http.py              # Cliente HTTP centralizado
+├── integrations/             # APIs externas
+│   ├── ine.py               # Instituto Nacional de Estadistica
+│   ├── aemet.py             # Agencia de Meteorologia
+│   └── boe.py               # Boletin Oficial del Estado
+├── notifications/            # Sistema de webhooks
+│   ├── webhook.py           # Gestor de webhooks
+│   └── watcher.py           # Vigilante de cambios
+├── prompts/                  # Guias de busqueda MCP
+├── examples/                 # Jupyter notebooks de ejemplo
+│   ├── 01_introduccion.ipynb
+│   ├── 02_busqueda_datasets.ipynb
+│   ├── 03_analisis_datos.ipynb
+│   ├── 04_integraciones.ipynb
+│   └── 05_webhooks.ipynb
+├── tests/                    # Tests automatizados
+├── docs/                     # Documentacion adicional
+│   └── DEPLOYMENT.md        # Guia de despliegue
+├── Dockerfile               # Imagen Docker
+├── docker-compose.yml       # Orquestacion Docker
+├── requirements.txt         # Dependencias Python
+├── Makefile                 # Comandos de desarrollo
 └── README.md
 ```
 
-## API de datos.gob.es
+## APIs Integradas
 
-Este servidor consume la API REST de datos.gob.es, que proporciona acceso al catálogo de datos abiertos del Gobierno de España.
+| API | Autenticacion | Documentacion |
+|-----|---------------|---------------|
+| datos.gob.es | No | [datos.gob.es/apidata](https://datos.gob.es/es/accessible-apidata) |
+| INE | No | [ine.es/dyngs/DataLab](https://www.ine.es/dyngs/DataLab/es/manual.html) |
+| AEMET | Si (gratis) | [opendata.aemet.es](https://opendata.aemet.es/dist/index.html) |
+| BOE | No | [boe.es/datosabiertos](https://www.boe.es/datosabiertos/) |
 
-- **Base URL**: `https://datos.gob.es/apidata/`
-- **Documentación oficial**: [datos.gob.es/apidata](https://datos.gob.es/es/accessible-apidata)
-- **Formatos soportados**: JSON, XML, RDF, Turtle, CSV
+## Docker
 
-### Parámetros de paginación
-
-- `_page`: Número de página (empieza en 0)
-- `_pageSize`: Tamaño de página (máximo 50)
-- `_sort`: Campo de ordenación (prefijo `-` para descendente)
-
-## Despliegue en FastMCP Cloud
-
-El servidor está preparado para desplegarse en FastMCP Cloud. El archivo principal es `server.py` en la raíz del proyecto.
+### Comandos Docker disponibles
 
 ```bash
-# Entry point para FastMCP Cloud
-server.py
+make docker-build  # Construir imagen
+make docker-up     # Iniciar en background
+make docker-down   # Parar contenedores
+make docker-run    # Ejecutar interactivo
+make docker-test   # Verificar que funciona
+make docker-dev    # Modo desarrollo
+make docker-logs   # Ver logs
+make docker-clean  # Limpiar todo
+```
+
+### Construir y ejecutar manualmente
+
+```bash
+# Construir
+docker-compose build
+
+# Ejecutar
+docker run -it --rm --env-file .env datos-gob-es-mcp_mcp-server
+```
+
+### Docker Compose
+
+```bash
+# Crear archivo .env con tus API keys
+cp .env.example .env
+
+# Iniciar en background
+docker-compose up -d
+
+# Ver logs
+docker-compose logs -f mcp-server
 ```
 
 ## Licencia
 
-MIT License - ver [LICENSE](LICENSE) para más detalles.
+MIT License - ver [LICENSE](LICENSE) para mas detalles.
 
 ## Contribuciones
 
@@ -350,6 +388,9 @@ Las contribuciones son bienvenidas. Por favor, abre un issue o pull request en e
 
 ## Enlaces
 
-- [datos.gob.es](https://datos.gob.es/) - Portal de datos abiertos del Gobierno de España
-- [Model Context Protocol](https://modelcontextprotocol.io/) - Especificación MCP
+- [datos.gob.es](https://datos.gob.es/) - Portal de datos abiertos del Gobierno de Espana
+- [Model Context Protocol](https://modelcontextprotocol.io/) - Especificacion MCP
 - [FastMCP](https://github.com/jlowin/fastmcp) - Framework para servidores MCP
+- [INE](https://www.ine.es/) - Instituto Nacional de Estadistica
+- [AEMET OpenData](https://opendata.aemet.es/) - Datos meteorologicos abiertos
+- [BOE](https://www.boe.es/) - Boletin Oficial del Estado

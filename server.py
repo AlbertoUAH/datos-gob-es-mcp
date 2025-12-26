@@ -3,13 +3,34 @@
 import csv
 import io
 import json
+import os
+import pickle
 import re
+from pathlib import Path
 from typing import Any
+
 from urllib.parse import urljoin
 
 import httpx
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
+
+# Core utilities for logging and rate limiting
+from core import setup_logging, get_logger, HTTPClient
+
+# Initialize structured logging
+setup_logging()
+logger = get_logger("datos_gob_es")
+
+# Optional imports for semantic search (lazy loaded)
+try:
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
+    EMBEDDINGS_AVAILABLE = True
+except ImportError:
+    EMBEDDINGS_AVAILABLE = False
+    np = None
+    SentenceTransformer = None
 
 
 # =============================================================================
@@ -41,10 +62,16 @@ class DatasetSummary(BaseModel):
     distributions_count: int = 0
 
     @classmethod
-    def from_api_item(cls, item: dict[str, Any]) -> "DatasetSummary":
-        """Create a DatasetSummary from an API response item."""
-        title = cls._extract_text(item.get("title"))
-        description = cls._extract_text(item.get("description"))
+    def from_api_item(cls, item: dict[str, Any], lang: str | None = "es") -> "DatasetSummary":
+        """Create a DatasetSummary from an API response item.
+
+        Args:
+            item: The raw API response item.
+            lang: Preferred language code ('es', 'en', 'ca', 'eu', 'gl').
+                  Default is 'es' (Spanish). Use None to return all languages.
+        """
+        title = cls._extract_text(item.get("title"), lang)
+        description = cls._extract_text(item.get("description"), lang)
 
         distributions = item.get("distribution", [])
         if isinstance(distributions, dict):
@@ -56,7 +83,7 @@ class DatasetSummary(BaseModel):
         elif isinstance(theme, list):
             theme = [t if isinstance(t, str) else str(t) for t in theme]
 
-        keywords = cls._extract_keywords(item.get("keyword", []))
+        keywords = cls._extract_keywords(item.get("keyword", []), lang)
 
         return cls(
             uri=item.get("_about", ""),
@@ -71,8 +98,13 @@ class DatasetSummary(BaseModel):
         )
 
     @staticmethod
-    def _extract_keywords(value: Any) -> list[str] | None:
-        """Extract keywords handling multilingual format."""
+    def _extract_keywords(value: Any, lang: str | None = None) -> list[str] | None:
+        """Extract keywords handling multilingual format.
+
+        Args:
+            value: The keywords field from the API response.
+            lang: Preferred language code. If None, returns all keywords.
+        """
         if value is None:
             return None
         if isinstance(value, str):
@@ -83,18 +115,28 @@ class DatasetSummary(BaseModel):
                 if isinstance(item, str):
                     keywords.append(item)
                 elif isinstance(item, dict):
+                    if lang and item.get("_lang") and item.get("_lang") != lang:
+                        continue
                     keywords.append(item.get("_value", str(item)))
             return keywords if keywords else None
         return None
 
     @staticmethod
-    def _extract_text(value: Any) -> str | list[str] | None:
-        """Extract text from multilingual field."""
+    def _extract_text(value: Any, lang: str | None = None) -> str | list[str] | None:
+        """Extract text from multilingual field, optionally filtering by language.
+
+        Args:
+            value: The field value from the API response.
+            lang: Preferred language code ('es', 'en', 'ca', 'eu', 'gl').
+                  If None, returns all language versions.
+        """
         if value is None:
             return None
         if isinstance(value, str):
             return value
         if isinstance(value, dict):
+            if lang and value.get("_lang") and value.get("_lang") != lang:
+                return None
             return value.get("_value", str(value))
         if isinstance(value, list):
             texts = []
@@ -102,8 +144,10 @@ class DatasetSummary(BaseModel):
                 if isinstance(item, str):
                     texts.append(item)
                 elif isinstance(item, dict):
+                    if lang and item.get("_lang") and item.get("_lang") != lang:
+                        continue
                     texts.append(item.get("_value", str(item)))
-            return texts if len(texts) > 1 else (texts[0] if texts else None)
+            return texts[0] if len(texts) == 1 else (texts if texts else None)
         return str(value)
 
 
@@ -160,6 +204,199 @@ class DistributionSummary(BaseModel):
 
 
 # =============================================================================
+# EMBEDDING INDEX FOR SEMANTIC SEARCH
+# =============================================================================
+
+
+class EmbeddingIndex:
+    """Manages dataset embeddings for semantic search.
+
+    Provides lazy-loaded semantic search capabilities using sentence-transformers.
+    The embedding index is cached to disk for faster subsequent loads.
+    """
+
+    MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    CACHE_DIR = Path.home() / ".cache" / "datos-gob-es"
+    CACHE_FILE = CACHE_DIR / "embeddings.pkl"
+
+    def __init__(self):
+        self.model = None
+        self.embeddings = None  # numpy array of shape (n_datasets, embedding_dim)
+        self.dataset_ids: list[str] = []
+        self.dataset_titles: list[str] = []
+        self.dataset_descriptions: list[str] = []
+        self._initialized = False
+
+    def _ensure_cache_dir(self):
+        """Create cache directory if it doesn't exist."""
+        self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _load_model(self):
+        """Lazy load the embedding model."""
+        if not EMBEDDINGS_AVAILABLE:
+            raise RuntimeError(
+                "Semantic search requires sentence-transformers and numpy. "
+                "Install with: pip install sentence-transformers numpy"
+            )
+        if self.model is None:
+            self.model = SentenceTransformer(self.MODEL_NAME)
+
+    def _load_cache(self) -> bool:
+        """Load embeddings from cache file if it exists.
+
+        Returns:
+            True if cache was loaded successfully, False otherwise.
+        """
+        if not self.CACHE_FILE.exists():
+            return False
+
+        try:
+            with open(self.CACHE_FILE, "rb") as f:
+                cache_data = pickle.load(f)
+
+            self.embeddings = cache_data["embeddings"]
+            self.dataset_ids = cache_data["dataset_ids"]
+            self.dataset_titles = cache_data["dataset_titles"]
+            self.dataset_descriptions = cache_data.get("dataset_descriptions", [])
+            self._initialized = True
+            return True
+        except Exception:
+            return False
+
+    def _save_cache(self):
+        """Save embeddings to cache file."""
+        self._ensure_cache_dir()
+        cache_data = {
+            "embeddings": self.embeddings,
+            "dataset_ids": self.dataset_ids,
+            "dataset_titles": self.dataset_titles,
+            "dataset_descriptions": self.dataset_descriptions,
+        }
+        with open(self.CACHE_FILE, "wb") as f:
+            pickle.dump(cache_data, f)
+
+    async def build_index(self, client: "DatosGobClient", max_datasets: int = 5000):
+        """Build embedding index from the catalog.
+
+        Args:
+            client: The API client to fetch datasets.
+            max_datasets: Maximum number of datasets to index.
+        """
+        self._load_model()
+
+        # Fetch all datasets
+        all_items: list[dict[str, Any]] = []
+        page = 0
+
+        while len(all_items) < max_datasets:
+            pagination = PaginationParams(page=page, page_size=200)
+            data = await client.list_datasets(pagination)
+
+            result = data.get("result", {})
+            items = result.get("items", [])
+
+            if not items:
+                break
+
+            all_items.extend(items)
+
+            if len(items) < 200:
+                break
+
+            page += 1
+
+        all_items = all_items[:max_datasets]
+
+        # Extract text for each dataset
+        self.dataset_ids = []
+        self.dataset_titles = []
+        self.dataset_descriptions = []
+        texts_to_encode: list[str] = []
+
+        for item in all_items:
+            dataset_id = item.get("_about", "")
+            title = DatasetSummary._extract_text(item.get("title"), "es")
+            description = DatasetSummary._extract_text(item.get("description"), "es")
+
+            # Convert to string
+            title_str = title if isinstance(title, str) else (title[0] if title else "")
+            desc_str = description if isinstance(description, str) else (description[0] if description else "")
+
+            self.dataset_ids.append(dataset_id)
+            self.dataset_titles.append(title_str)
+            self.dataset_descriptions.append(desc_str)
+
+            # Combine title and description for embedding
+            combined_text = f"{title_str}. {desc_str}" if desc_str else title_str
+            texts_to_encode.append(combined_text)
+
+        # Generate embeddings
+        self.embeddings = self.model.encode(texts_to_encode, show_progress_bar=False)
+        self._initialized = True
+
+        # Save to cache
+        self._save_cache()
+
+    def search(self, query: str, top_k: int = 20, min_score: float = 0.3) -> list[dict[str, Any]]:
+        """Search for similar datasets using cosine similarity.
+
+        Args:
+            query: The search query.
+            top_k: Maximum number of results to return.
+            min_score: Minimum similarity score (0-1).
+
+        Returns:
+            List of dicts with dataset_id, title, description, and score.
+        """
+        if not self._initialized:
+            raise RuntimeError("Index not initialized. Call build_index() first.")
+
+        self._load_model()
+
+        # Encode query
+        query_embedding = self.model.encode(query)
+
+        # Calculate cosine similarity
+        # Normalize embeddings
+        query_norm = query_embedding / np.linalg.norm(query_embedding)
+        embeddings_norm = self.embeddings / np.linalg.norm(self.embeddings, axis=1, keepdims=True)
+
+        # Cosine similarity
+        similarities = np.dot(embeddings_norm, query_norm)
+
+        # Get top-k indices
+        top_indices = np.argsort(similarities)[::-1][:top_k]
+
+        results = []
+        for idx in top_indices:
+            score = float(similarities[idx])
+            if score < min_score:
+                break
+            results.append({
+                "dataset_id": self.dataset_ids[idx],
+                "title": self.dataset_titles[idx],
+                "description": self.dataset_descriptions[idx][:200] + "..." if len(self.dataset_descriptions[idx]) > 200 else self.dataset_descriptions[idx],
+                "score": round(score, 4),
+            })
+
+        return results
+
+    def clear_cache(self):
+        """Delete the cache file."""
+        if self.CACHE_FILE.exists():
+            self.CACHE_FILE.unlink()
+        self._initialized = False
+        self.embeddings = None
+        self.dataset_ids = []
+        self.dataset_titles = []
+        self.dataset_descriptions = []
+
+
+# Global embedding index instance
+embedding_index = EmbeddingIndex()
+
+
+# =============================================================================
 # HTTP CLIENT
 # =============================================================================
 
@@ -174,13 +411,17 @@ class DatosGobClientError(Exception):
 
 
 class DatosGobClient:
-    """Async HTTP client for the datos.gob.es API."""
+    """Async HTTP client for the datos.gob.es API.
+
+    Uses HTTPClient for automatic logging and rate limiting.
+    """
 
     BASE_URL = "https://datos.gob.es/apidata/"
     DEFAULT_TIMEOUT = 30.0
 
     def __init__(self, timeout: float = DEFAULT_TIMEOUT):
         self.timeout = timeout
+        self.http = HTTPClient("datos.gob.es", self.BASE_URL, timeout)
 
     def _build_params(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
         """Build query parameters from pagination settings."""
@@ -193,25 +434,18 @@ class DatosGobClient:
         return params
 
     async def _request(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Make an async HTTP request to the API."""
-        url = urljoin(self.BASE_URL, endpoint)
-        if not url.endswith(".json"):
-            url = f"{url}.json"
+        """Make an async HTTP request to the API with logging and rate limiting."""
+        # Add .json extension if not present
+        if not endpoint.endswith(".json"):
+            endpoint = f"{endpoint}.json"
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await client.get(url, params=params)
-                response.raise_for_status()
-                return response.json()
-            except httpx.TimeoutException as e:
-                raise DatosGobClientError(f"Request timed out: {e}") from e
-            except httpx.HTTPStatusError as e:
-                raise DatosGobClientError(
-                    f"HTTP error {e.response.status_code}: {e.response.text}",
-                    status_code=e.response.status_code,
-                ) from e
-            except httpx.RequestError as e:
-                raise DatosGobClientError(f"Request failed: {e}") from e
+        try:
+            return await self.http.get_json(endpoint, params=params)
+        except Exception as e:
+            # Re-raise as DatosGobClientError for backwards compatibility
+            if hasattr(e, 'status_code'):
+                raise DatosGobClientError(str(e), status_code=e.status_code) from e
+            raise DatosGobClientError(str(e)) from e
 
     async def list_datasets(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
         params = self._build_params(pagination)
@@ -334,8 +568,17 @@ mcp = FastMCP("datos-gob-es")
 client = DatosGobClient()
 
 
-def _format_response(data: dict[str, Any], summary_type: str | None = None) -> str:
-    """Format API response for readable output."""
+def _format_response(
+    data: dict[str, Any], summary_type: str | None = None, lang: str | None = "es"
+) -> str:
+    """Format API response for readable output.
+
+    Args:
+        data: The raw API response.
+        summary_type: Type of summary to generate ('dataset', 'distribution', or None).
+        lang: Preferred language code ('es', 'en', 'ca', 'eu', 'gl').
+              Default is 'es' (Spanish). Use None to return all languages.
+    """
     result = data.get("result", {})
     items = result.get("items", [])
 
@@ -347,7 +590,8 @@ def _format_response(data: dict[str, Any], summary_type: str | None = None) -> s
 
     if summary_type == "dataset":
         output["datasets"] = [
-            DatasetSummary.from_api_item(item).model_dump(exclude_none=True) for item in items
+            DatasetSummary.from_api_item(item, lang).model_dump(exclude_none=True)
+            for item in items
         ]
     elif summary_type == "distribution":
         output["distributions"] = [
@@ -364,6 +608,47 @@ def _handle_error(e: Exception) -> str:
     if isinstance(e, DatosGobClientError):
         return json.dumps({"error": e.message, "status_code": e.status_code}, ensure_ascii=False)
     return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+async def _fetch_all_pages(
+    fetch_fn,
+    max_results: int = 2000,
+    sort: str | None = None,
+    **kwargs,
+) -> list[dict[str, Any]]:
+    """Fetch all pages from an API endpoint up to max_results.
+
+    Args:
+        fetch_fn: The client method to call for fetching data.
+        max_results: Maximum number of results to fetch.
+        sort: Sort field for the query.
+        **kwargs: Additional arguments to pass to fetch_fn.
+
+    Returns:
+        List of all items fetched across multiple pages.
+    """
+    all_items: list[dict[str, Any]] = []
+    page = 0
+
+    while len(all_items) < max_results:
+        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
+        data = await fetch_fn(pagination=pagination, **kwargs)
+
+        result = data.get("result", {})
+        items = result.get("items", [])
+
+        if not items:
+            break
+
+        all_items.extend(items)
+
+        # Check if we got less than page_size (last page)
+        if len(items) < DEFAULT_PAGE_SIZE:
+            break
+
+        page += 1
+
+    return all_items[:max_results]
 
 
 def _extract_text_for_match(value: Any) -> str:
@@ -715,6 +1000,9 @@ async def _format_response_with_preview(data: dict[str, Any], preview_rows: int)
 async def list_datasets(
     page: int = 0,
     sort: str | None = "-modified",
+    lang: str | None = "es",
+    fetch_all: bool = False,
+    max_results: int = 2000,
 ) -> str:
     """List datasets from the Spanish open data catalog.
 
@@ -722,22 +1010,41 @@ async def list_datasets(
     what public data is available from Spanish government institutions.
 
     Args:
-        page: Page number (starting from 0).
+        page: Page number (starting from 0). Ignored if fetch_all=True.
         sort: Sort field. Use '-' prefix for descending. Examples: '-modified', 'title', '-issued'.
+        lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'. Use None for all.
+        fetch_all: If True, fetches all pages automatically up to max_results.
+        max_results: Maximum results when fetch_all=True (default 2000, max 10000).
 
     Returns:
         JSON with datasets including title, description, publisher, and available formats.
     """
     try:
+        max_results = min(max_results, 10000)  # Safety limit
+
+        if fetch_all:
+            all_items = await _fetch_all_pages(
+                client.list_datasets, max_results=max_results, sort=sort
+            )
+            output = {
+                "total_results": len(all_items),
+                "fetch_all": True,
+                "datasets": [
+                    DatasetSummary.from_api_item(item, lang).model_dump(exclude_none=True)
+                    for item in all_items
+                ],
+            }
+            return json.dumps(output, ensure_ascii=False, indent=2)
+
         pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
         data = await client.list_datasets(pagination)
-        return _format_response(data, "dataset")
+        return _format_response(data, "dataset", lang)
     except Exception as e:
         return _handle_error(e)
 
 
 @mcp.tool()
-async def get_dataset(dataset_id: str) -> str:
+async def get_dataset(dataset_id: str, lang: str | None = "es") -> str:
     """Get detailed information about a specific dataset.
 
     Retrieve complete metadata for a dataset including all its distributions
@@ -745,13 +1052,14 @@ async def get_dataset(dataset_id: str) -> str:
 
     Args:
         dataset_id: The dataset identifier (slug from the URL or URI).
+        lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'. Use None for all.
 
     Returns:
         JSON with full dataset details including download URLs.
     """
     try:
         data = await client.get_dataset(dataset_id)
-        return _format_response(data, "dataset")
+        return _format_response(data, "dataset", lang)
     except Exception as e:
         return _handle_error(e)
 
@@ -769,6 +1077,9 @@ async def search_datasets(
     date_end: str | None = None,
     exact_match: bool = False,
     page: int = 0,
+    lang: str | None = "es",
+    fetch_all: bool = False,
+    max_results: int = 2000,
 ) -> str:
     """Search and filter datasets from the Spanish open data catalog.
 
@@ -786,12 +1097,16 @@ async def search_datasets(
         date_start: Start date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-01-01T00:00Z').
         date_end: End date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-12-31T23:59Z').
         exact_match: If True with title, match whole words only (e.g., 'DANA' won't match 'ciudadana').
-        page: Page number (starting from 0).
+        page: Page number (starting from 0). Ignored if fetch_all=True.
+        lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'. Use None for all.
+        fetch_all: If True, fetches all pages automatically up to max_results.
+        max_results: Maximum results when fetch_all=True (default 2000, max 10000).
 
     Returns:
         JSON with matching datasets.
     """
     try:
+        max_results = min(max_results, 10000)  # Safety limit
         pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
         data: dict[str, Any] | None = None
         local_filters: dict[str, Any] = {}
@@ -800,7 +1115,7 @@ async def search_datasets(
         if title:
             if exact_match:
                 # Search multiple pages to find exact matches
-                max_pages = 10
+                max_pages = 50 if fetch_all else 10
                 all_filtered_items: list[dict[str, Any]] = []
 
                 for current_page in range(max_pages):
@@ -820,24 +1135,38 @@ async def search_datasets(
                     )
                     all_filtered_items.extend(filtered)
 
-                    if len(all_filtered_items) >= DEFAULT_PAGE_SIZE:
+                    if not fetch_all and len(all_filtered_items) >= DEFAULT_PAGE_SIZE:
+                        break
+                    if fetch_all and len(all_filtered_items) >= max_results:
                         break
 
-                start_idx = page * DEFAULT_PAGE_SIZE
-                end_idx = start_idx + DEFAULT_PAGE_SIZE
-                paginated_items = all_filtered_items[start_idx:end_idx]
+                if fetch_all:
+                    all_filtered_items = all_filtered_items[:max_results]
+                    output = {
+                        "total_results": len(all_filtered_items),
+                        "fetch_all": True,
+                        "exact_match": True,
+                        "datasets": [
+                            DatasetSummary.from_api_item(item, lang).model_dump(exclude_none=True)
+                            for item in all_filtered_items
+                        ],
+                    }
+                else:
+                    start_idx = page * DEFAULT_PAGE_SIZE
+                    end_idx = start_idx + DEFAULT_PAGE_SIZE
+                    paginated_items = all_filtered_items[start_idx:end_idx]
 
-                output = {
-                    "total_in_page": len(paginated_items),
-                    "total_exact_matches": len(all_filtered_items),
-                    "page": page,
-                    "items_per_page": DEFAULT_PAGE_SIZE,
-                    "exact_match": True,
-                    "datasets": [
-                        DatasetSummary.from_api_item(item).model_dump(exclude_none=True)
-                        for item in paginated_items
-                    ],
-                }
+                    output = {
+                        "total_in_page": len(paginated_items),
+                        "total_exact_matches": len(all_filtered_items),
+                        "page": page,
+                        "items_per_page": DEFAULT_PAGE_SIZE,
+                        "exact_match": True,
+                        "datasets": [
+                            DatasetSummary.from_api_item(item, lang).model_dump(exclude_none=True)
+                            for item in paginated_items
+                        ],
+                    }
                 return json.dumps(output, ensure_ascii=False, indent=2)
             else:
                 data = await client.search_datasets_by_title(title, pagination)
@@ -884,7 +1213,68 @@ async def search_datasets(
             )
             data["result"]["items"] = filtered_items
 
-        return _format_response(data, "dataset") if data else json.dumps({"error": "No data"})
+        return _format_response(data, "dataset", lang) if data else json.dumps({"error": "No data"})
+
+    except Exception as e:
+        return _handle_error(e)
+
+
+@mcp.tool()
+async def semantic_search(
+    query: str,
+    top_k: int = 20,
+    min_score: float = 0.3,
+    rebuild_index: bool = False,
+) -> str:
+    """Search datasets by meaning using AI embeddings.
+
+    This tool understands natural language queries and finds semantically
+    relevant datasets even if exact keywords don't match. For example,
+    searching "unemployment data" will find datasets about "employment statistics".
+
+    Note: First use may take 30-60 seconds to build the embedding index.
+    Subsequent searches are fast (<1 second). The index is cached on disk.
+
+    Args:
+        query: Natural language search query (e.g., "unemployment statistics in Valencia").
+        top_k: Maximum number of results to return (default 20, max 100).
+        min_score: Minimum similarity score 0-1 (default 0.3). Higher = more relevant.
+        rebuild_index: Force rebuild the embedding index (slow, use sparingly).
+
+    Returns:
+        JSON with matching datasets ranked by semantic relevance score.
+    """
+    if not EMBEDDINGS_AVAILABLE:
+        return json.dumps({
+            "error": "Semantic search not available. Install dependencies with: pip install sentence-transformers numpy",
+            "suggestion": "Use search_datasets with title parameter for keyword-based search instead."
+        }, ensure_ascii=False)
+
+    try:
+        top_k = min(top_k, 100)  # Safety limit
+
+        # Check if we need to build or rebuild the index
+        if rebuild_index:
+            embedding_index.clear_cache()
+
+        # Try to load from cache first
+        if not embedding_index._initialized:
+            cache_loaded = embedding_index._load_cache()
+            if not cache_loaded:
+                # Need to build index from scratch
+                await embedding_index.build_index(client, max_datasets=5000)
+
+        # Perform semantic search
+        results = embedding_index.search(query, top_k=top_k, min_score=min_score)
+
+        output = {
+            "query": query,
+            "total_results": len(results),
+            "min_score": min_score,
+            "datasets": results,
+        }
+
+        return json.dumps(output, ensure_ascii=False, indent=2)
 
     except Exception as e:
         return _handle_error(e)
@@ -1437,6 +1827,48 @@ try:
     register_prompts(mcp)
 except ImportError:
     # Prompts folder not available, skip registration
+    pass
+
+
+# =============================================================================
+# INTEGRATIONS - External APIs (INE, AEMET, BOE)
+# =============================================================================
+
+# Import and register INE tools
+try:
+    from integrations.ine import register_ine_tools
+    register_ine_tools(mcp)
+except ImportError:
+    # INE integration not available
+    pass
+
+# Import and register AEMET tools
+try:
+    from integrations.aemet import register_aemet_tools
+    register_aemet_tools(mcp)
+except ImportError:
+    # AEMET integration not available
+    pass
+
+# Import and register BOE tools
+try:
+    from integrations.boe import register_boe_tools
+    register_boe_tools(mcp)
+except ImportError:
+    # BOE integration not available
+    pass
+
+
+# =============================================================================
+# NOTIFICATIONS - Webhooks and Dataset Watching
+# =============================================================================
+
+# Import and register webhook/notification tools
+try:
+    from notifications.webhook import register_webhook_tools
+    register_webhook_tools(mcp)
+except ImportError:
+    # Notifications not available
     pass
 
 

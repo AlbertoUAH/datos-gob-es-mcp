@@ -1,0 +1,64 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+
+# Ruff
+.ruff_cache/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Examples (not needed in production image)
+examples/
+
+# Tests
+tests/
+
+# Local config
+.env
+.env.local
+
+# Cache files
+*.pkl
+*.pickle
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

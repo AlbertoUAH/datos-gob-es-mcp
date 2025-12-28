@@ -632,7 +632,8 @@ class EmbeddingIndex:
             if score < min_score:
                 break
             results.append({
-                "dataset_id": self.dataset_ids[idx],
+                "uri": self.dataset_ids[idx],  # Use uri for consistency
+                "dataset_id": self.dataset_ids[idx].split("/")[-1] if "/" in self.dataset_ids[idx] else self.dataset_ids[idx],
                 "title": self.dataset_titles[idx],
                 "description": self.dataset_descriptions[idx][:200] + "..." if len(self.dataset_descriptions[idx]) > 200 else self.dataset_descriptions[idx],
                 "score": round(score, 4),
@@ -722,8 +723,10 @@ class EmbeddingIndex:
                 break
             if len(results) >= top_k:
                 break
+            ds_uri = self.dataset_ids[idx]
             results.append({
-                "dataset_id": self.dataset_ids[idx],
+                "uri": ds_uri,
+                "dataset_id": ds_uri.split("/")[-1] if "/" in ds_uri else ds_uri,
                 "title": self.dataset_titles[idx],
                 "description": self.dataset_descriptions[idx][:200] + "..."
                               if len(self.dataset_descriptions[idx]) > 200
@@ -975,6 +978,118 @@ embedding_index = EmbeddingIndex()
 
 # Global metadata cache instance
 metadata_cache = MetadataCache()
+
+
+# =============================================================================
+# USAGE METRICS - Track tool and dataset usage (Proposal 19)
+# =============================================================================
+
+
+class UsageMetrics:
+    """Track usage statistics for tools and datasets.
+
+    Stores metrics in a local file for persistence across sessions.
+    """
+
+    METRICS_DIR = Path.home() / ".cache" / "datos-gob-es"
+    METRICS_FILE = METRICS_DIR / "usage_metrics.json"
+
+    def __init__(self):
+        self.tool_calls: dict[str, int] = {}
+        self.dataset_accesses: dict[str, int] = {}
+        self.search_queries: list[dict[str, Any]] = []
+        self.session_start: float = time.time()
+        self._load_metrics()
+
+    def _load_metrics(self) -> None:
+        """Load metrics from disk if available."""
+        try:
+            if self.METRICS_FILE.exists():
+                with open(self.METRICS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.tool_calls = data.get("tool_calls", {})
+                    self.dataset_accesses = data.get("dataset_accesses", {})
+                    # Keep only last 100 search queries
+                    self.search_queries = data.get("search_queries", [])[-100:]
+        except Exception:
+            # Start fresh if load fails
+            pass
+
+    def _save_metrics(self) -> None:
+        """Save metrics to disk."""
+        try:
+            self.METRICS_DIR.mkdir(parents=True, exist_ok=True)
+            data = {
+                "tool_calls": self.tool_calls,
+                "dataset_accesses": self.dataset_accesses,
+                "search_queries": self.search_queries[-100:],  # Keep last 100
+                "last_updated": time.time(),
+            }
+            with open(self.METRICS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def record_tool_call(self, tool_name: str) -> None:
+        """Record a tool invocation."""
+        self.tool_calls[tool_name] = self.tool_calls.get(tool_name, 0) + 1
+        self._save_metrics()
+
+    def record_dataset_access(self, dataset_id: str) -> None:
+        """Record a dataset access."""
+        self.dataset_accesses[dataset_id] = self.dataset_accesses.get(dataset_id, 0) + 1
+        self._save_metrics()
+
+    def record_search(self, query_params: dict[str, Any]) -> None:
+        """Record a search query."""
+        self.search_queries.append({
+            "timestamp": time.time(),
+            "params": {k: v for k, v in query_params.items() if v is not None},
+        })
+        self._save_metrics()
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get usage statistics."""
+        # Top 10 most used tools
+        top_tools = sorted(
+            self.tool_calls.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:10]
+
+        # Top 10 most accessed datasets
+        top_datasets = sorted(
+            self.dataset_accesses.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:10]
+
+        # Recent search patterns
+        recent_searches = self.search_queries[-10:]
+
+        return {
+            "total_tool_calls": sum(self.tool_calls.values()),
+            "unique_tools_used": len(self.tool_calls),
+            "top_tools": [{"tool": t, "calls": c} for t, c in top_tools],
+            "total_dataset_accesses": sum(self.dataset_accesses.values()),
+            "unique_datasets_accessed": len(self.dataset_accesses),
+            "top_datasets": [{"dataset_id": d, "accesses": c} for d, c in top_datasets],
+            "total_searches": len(self.search_queries),
+            "recent_searches": recent_searches,
+            "session_duration_minutes": round((time.time() - self.session_start) / 60, 2),
+        }
+
+    def clear(self) -> None:
+        """Clear all metrics."""
+        self.tool_calls = {}
+        self.dataset_accesses = {}
+        self.search_queries = []
+        self.session_start = time.time()
+        self._save_metrics()
+
+
+# Global usage metrics instance
+usage_metrics = UsageMetrics()
 
 
 # =============================================================================
@@ -2509,6 +2624,9 @@ async def get_dataset(dataset_id: str, lang: str | None = "es") -> str:
     Returns:
         JSON with full dataset details including download URLs.
     """
+    usage_metrics.record_tool_call("get_dataset")
+    usage_metrics.record_dataset_access(dataset_id)
+
     try:
         data = await client.get_dataset(dataset_id)
         return _format_response(data, "dataset", lang)
@@ -2581,6 +2699,14 @@ async def search_datasets(
     Returns:
         JSON with matching datasets including metadata and data preview.
     """
+    # Record usage metrics
+    usage_metrics.record_tool_call("search_datasets")
+    usage_metrics.record_search({
+        "title": title, "publisher": publisher, "theme": theme, "themes": themes,
+        "format": format, "keyword": keyword, "spatial_type": spatial_type,
+        "spatial_value": spatial_value, "semantic_query": semantic_query,
+    })
+
     try:
         max_results = min(max_results, 10000)  # Safety limit
         semantic_top_k = min(semantic_top_k, 100)  # Safety limit
@@ -2913,6 +3039,9 @@ async def get_related_datasets(
     Returns:
         JSON with similar datasets ranked by similarity score.
     """
+    usage_metrics.record_tool_call("get_related_datasets")
+    usage_metrics.record_dataset_access(dataset_id)
+
     top_k = min(top_k, 50)
 
     try:
@@ -3012,6 +3141,9 @@ async def download_data(
         JSON with columns, rows, total_rows, format, and statistics.
         Large responses may be truncated at max_mb.
     """
+    usage_metrics.record_tool_call("download_data")
+    usage_metrics.record_dataset_access(dataset_id)
+
     max_mb = min(max_mb, 50)  # Safety limit
 
     try:
@@ -3335,6 +3467,151 @@ async def refresh_metadata_cache() -> str:
         return json.dumps(stats, ensure_ascii=False, indent=2)
     except Exception as e:
         return _handle_error(e)
+
+
+@mcp.tool()
+async def export_results(
+    search_results: str,
+    format: str = "csv",
+    include_preview: bool = False,
+) -> str:
+    """Export search results to CSV or JSON format for download.
+
+    Takes the JSON output from search_datasets or other search tools
+    and converts it to a downloadable format.
+
+    Args:
+        search_results: JSON string from a previous search_datasets call.
+        format: Output format - 'csv' or 'json' (default: csv).
+        include_preview: Include data preview columns if available (default: False).
+
+    Returns:
+        Formatted data as CSV or JSON string ready for saving to file.
+
+    Example workflow:
+        1. results = search_datasets(title="presupuesto", theme="economia")
+        2. csv_data = export_results(results, format="csv")
+        3. Save csv_data to file: presupuestos.csv
+    """
+    usage_metrics.record_tool_call("export_results")
+
+    try:
+        data = json.loads(search_results)
+    except json.JSONDecodeError:
+        return json.dumps({"error": "Invalid JSON input. Please provide output from search_datasets."})
+
+    # Extract datasets from various response formats
+    datasets = []
+    if "datasets" in data:
+        datasets = data["datasets"]
+    elif "items" in data:
+        datasets = data["items"]
+    elif isinstance(data, list):
+        datasets = data
+
+    if not datasets:
+        return json.dumps({"error": "No datasets found in input."})
+
+    # Define columns to export
+    base_columns = [
+        "uri", "title", "description", "publisher", "theme",
+        "modified", "keyword", "format", "distributions_count"
+    ]
+
+    preview_columns = ["preview_columns", "preview_row_count"] if include_preview else []
+    columns = base_columns + preview_columns
+
+    if format.lower() == "csv":
+        # Generate CSV
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=columns, extrasaction='ignore')
+        writer.writeheader()
+
+        for ds in datasets:
+            row = {}
+            for col in columns:
+                value = ds.get(col, "")
+                # Handle lists and complex types
+                if isinstance(value, list):
+                    value = "; ".join(str(v) for v in value)
+                elif isinstance(value, dict):
+                    value = json.dumps(value, ensure_ascii=False)
+                row[col] = value
+            writer.writerow(row)
+
+        csv_content = output.getvalue()
+        return json.dumps({
+            "format": "csv",
+            "rows_exported": len(datasets),
+            "columns": columns,
+            "content": csv_content,
+            "save_as": "datasets_export.csv",
+        }, ensure_ascii=False, indent=2)
+
+    elif format.lower() == "json":
+        # Generate clean JSON
+        exported = []
+        for ds in datasets:
+            item = {col: ds.get(col) for col in columns if col in ds}
+            exported.append(item)
+
+        return json.dumps({
+            "format": "json",
+            "rows_exported": len(datasets),
+            "columns": columns,
+            "content": exported,
+            "save_as": "datasets_export.json",
+        }, ensure_ascii=False, indent=2)
+
+    else:
+        return json.dumps({"error": f"Unsupported format: {format}. Use 'csv' or 'json'."})
+
+
+@mcp.tool()
+async def get_usage_stats(include_searches: bool = True) -> str:
+    """Get usage statistics for MCP tools and datasets.
+
+    Shows which tools are used most frequently, which datasets are accessed
+    most often, and recent search patterns. Useful for understanding usage
+    patterns and optimizing workflows.
+
+    Args:
+        include_searches: Include recent search queries in output (default: True).
+
+    Returns:
+        JSON with usage statistics including:
+        - Top 10 most used tools
+        - Top 10 most accessed datasets
+        - Total counts and session duration
+        - Recent search patterns (if include_searches=True)
+    """
+    usage_metrics.record_tool_call("get_usage_stats")
+
+    stats = usage_metrics.get_stats()
+
+    if not include_searches:
+        stats.pop("recent_searches", None)
+
+    return json.dumps(stats, ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+async def clear_usage_stats() -> str:
+    """Clear all usage statistics.
+
+    Resets the usage metrics to start fresh. Use this to clear history
+    or start a new analysis session.
+
+    Returns:
+        Confirmation message.
+    """
+    usage_metrics.record_tool_call("clear_usage_stats")
+    usage_metrics.clear()
+
+    return json.dumps({
+        "status": "success",
+        "message": "Usage statistics cleared.",
+    }, ensure_ascii=False, indent=2)
 
 
 # =============================================================================

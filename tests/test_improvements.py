@@ -387,3 +387,214 @@ class TestIntegration:
         assert hasattr(metadata_cache, "get_publishers")
         assert hasattr(metadata_cache, "get_themes")
         assert hasattr(metadata_cache, "clear")
+
+
+# =============================================================================
+# Test 6: Export Results (Proposal 11)
+# =============================================================================
+
+
+class TestExportResults:
+    """Tests for the export_results tool."""
+
+    @pytest.mark.asyncio
+    async def test_export_to_csv(self):
+        """Should export datasets to CSV format."""
+        from server import export_results
+
+        # Get the underlying function
+        fn = export_results.fn if hasattr(export_results, 'fn') else export_results
+
+        search_results = json.dumps({
+            "datasets": [
+                {"uri": "ds1", "title": "Dataset 1", "description": "Desc 1"},
+                {"uri": "ds2", "title": "Dataset 2", "description": "Desc 2"},
+            ]
+        })
+
+        result = await fn(search_results, format="csv")
+        data = json.loads(result)
+
+        assert data["format"] == "csv"
+        assert data["rows_exported"] == 2
+        assert "content" in data
+        assert "uri,title,description" in data["content"]
+
+    @pytest.mark.asyncio
+    async def test_export_to_json(self):
+        """Should export datasets to JSON format."""
+        from server import export_results
+
+        fn = export_results.fn if hasattr(export_results, 'fn') else export_results
+
+        search_results = json.dumps({
+            "datasets": [
+                {"uri": "ds1", "title": "Dataset 1"},
+            ]
+        })
+
+        result = await fn(search_results, format="json")
+        data = json.loads(result)
+
+        assert data["format"] == "json"
+        assert data["rows_exported"] == 1
+        assert isinstance(data["content"], list)
+
+    @pytest.mark.asyncio
+    async def test_export_invalid_json(self):
+        """Should handle invalid JSON input."""
+        from server import export_results
+
+        fn = export_results.fn if hasattr(export_results, 'fn') else export_results
+
+        result = await fn("not valid json", format="csv")
+        data = json.loads(result)
+
+        assert "error" in data
+
+    @pytest.mark.asyncio
+    async def test_export_empty_results(self):
+        """Should handle empty results."""
+        from server import export_results
+
+        fn = export_results.fn if hasattr(export_results, 'fn') else export_results
+
+        result = await fn('{"datasets": []}', format="csv")
+        data = json.loads(result)
+
+        assert "error" in data
+
+
+# =============================================================================
+# Test 7: Usage Metrics (Proposal 19)
+# =============================================================================
+
+
+class TestUsageMetrics:
+    """Tests for the UsageMetrics class."""
+
+    def test_usage_metrics_instance_exists(self):
+        """Global usage_metrics instance should exist."""
+        from server import usage_metrics
+
+        assert usage_metrics is not None
+        assert hasattr(usage_metrics, "record_tool_call")
+        assert hasattr(usage_metrics, "record_dataset_access")
+        assert hasattr(usage_metrics, "record_search")
+        assert hasattr(usage_metrics, "get_stats")
+        assert hasattr(usage_metrics, "clear")
+
+    def test_record_tool_call(self):
+        """Should record tool calls."""
+        from server import UsageMetrics
+
+        metrics = UsageMetrics()
+        metrics.clear()
+
+        metrics.record_tool_call("test_tool")
+        metrics.record_tool_call("test_tool")
+        metrics.record_tool_call("another_tool")
+
+        stats = metrics.get_stats()
+        assert stats["total_tool_calls"] == 3
+        assert stats["unique_tools_used"] == 2
+
+    def test_record_dataset_access(self):
+        """Should record dataset accesses."""
+        from server import UsageMetrics
+
+        metrics = UsageMetrics()
+        metrics.clear()
+
+        metrics.record_dataset_access("dataset-1")
+        metrics.record_dataset_access("dataset-1")
+        metrics.record_dataset_access("dataset-2")
+
+        stats = metrics.get_stats()
+        assert stats["total_dataset_accesses"] == 3
+        assert stats["unique_datasets_accessed"] == 2
+
+    def test_record_search(self):
+        """Should record search queries."""
+        from server import UsageMetrics
+
+        metrics = UsageMetrics()
+        metrics.clear()
+
+        metrics.record_search({"title": "test", "theme": "economia"})
+
+        stats = metrics.get_stats()
+        assert stats["total_searches"] == 1
+        assert len(stats["recent_searches"]) == 1
+
+    def test_clear_metrics(self):
+        """Should clear all metrics."""
+        from server import UsageMetrics
+
+        metrics = UsageMetrics()
+        metrics.record_tool_call("test")
+        metrics.record_dataset_access("ds1")
+        metrics.record_search({"q": "test"})
+
+        metrics.clear()
+        stats = metrics.get_stats()
+
+        assert stats["total_tool_calls"] == 0
+        assert stats["total_dataset_accesses"] == 0
+        assert stats["total_searches"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_usage_stats_tool(self):
+        """get_usage_stats tool should return statistics."""
+        from server import get_usage_stats
+
+        fn = get_usage_stats.fn if hasattr(get_usage_stats, 'fn') else get_usage_stats
+
+        result = await fn(include_searches=True)
+        data = json.loads(result)
+
+        assert "total_tool_calls" in data
+        assert "top_tools" in data
+        assert "session_duration_minutes" in data
+
+
+# =============================================================================
+# Test 8: Interactive Documentation Prompts (Proposal 20)
+# =============================================================================
+
+
+class TestGuiaHerramientasPrompt:
+    """Tests for the guia_herramientas prompt."""
+
+    def test_prompt_generates_content(self):
+        """Should generate documentation content."""
+        from prompts.guia_herramientas import generate_prompt
+
+        content = generate_prompt(tool_category="all", include_examples=True)
+
+        assert "Guia de Herramientas MCP" in content
+        assert "search_datasets" in content
+        assert "Ejemplos Practicos" in content
+
+    def test_prompt_filter_by_category(self):
+        """Should filter by tool category."""
+        from prompts.guia_herramientas import generate_prompt
+
+        # Search category
+        search_content = generate_prompt(tool_category="search", include_examples=False)
+        assert "search_datasets" in search_content
+        assert "ine_list_operations" not in search_content
+
+        # External category
+        external_content = generate_prompt(tool_category="external", include_examples=False)
+        assert "ine_list_operations" in external_content
+        assert "aemet_list_stations" in external_content
+
+    def test_prompt_without_examples(self):
+        """Should work without examples."""
+        from prompts.guia_herramientas import generate_prompt
+
+        content = generate_prompt(tool_category="all", include_examples=False)
+
+        assert "Guia de Herramientas MCP" in content
+        assert "Ejemplos Practicos" not in content

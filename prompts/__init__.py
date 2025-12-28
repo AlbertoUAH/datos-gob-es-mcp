@@ -1,6 +1,6 @@
 """MCP Prompts para datos.gob.es - Guías de búsqueda detalladas."""
 
-from . import buscar_por_tema, datasets_recientes, explorar_catalogo, analisis_dataset
+from . import buscar_por_tema, datasets_recientes, explorar_catalogo, analisis_dataset, guia_herramientas
 
 
 def register_prompts(mcp):
@@ -85,6 +85,24 @@ def register_prompts(mcp):
         return analisis_dataset.generate_prompt(
             dataset_id, incluir_distribuciones, evaluar_calidad
         )
+
+    @mcp.prompt()
+    def prompt_guia_herramientas(
+        tool_category: str = "all",
+        include_examples: bool = True
+    ) -> str:
+        """
+        Guia interactiva de herramientas MCP con ejemplos de uso.
+
+        Este prompt proporciona documentacion completa de todas las herramientas
+        disponibles del servidor MCP de datos.gob.es, organizadas por categoria
+        y con ejemplos practicos de uso.
+
+        Args:
+            tool_category: Categoria a mostrar ('all', 'search', 'metadata', 'external', 'utilities')
+            include_examples: Si incluir ejemplos de uso practicos
+        """
+        return guia_herramientas.generate_prompt(tool_category, include_examples)
 
 
 __all__ = ["register_prompts"]

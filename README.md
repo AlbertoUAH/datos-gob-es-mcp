@@ -12,9 +12,9 @@ Este servidor MCP permite a asistentes de IA como Claude, ChatGPT y otros client
 
 ### Caracteristicas
 
-- **29 herramientas MCP** para consultar multiples APIs de datos publicos
+- **32 herramientas MCP** para consultar multiples APIs de datos publicos
 - **13 recursos MCP** (9 estaticos + 4 templates dinamicos) para acceso directo a datos
-- **4 prompts MCP** para guias de busqueda detalladas
+- **5 prompts MCP** para guias de busqueda detalladas
 - **Integraciones externas**:
   - **INE**: Estadisticas oficiales de Espana
   - **AEMET**: Datos meteorologicos (requiere API key gratuita)
@@ -100,9 +100,9 @@ make inspect
 
 | Capacidad | Cantidad | Descripcion |
 |-----------|----------|-------------|
-| **Tools** | 29 | Funciones que el LLM puede invocar |
+| **Tools** | 32 | Funciones que el LLM puede invocar |
 | **Resources** | 13 | Datos estaticos y dinamicos accesibles |
-| **Prompts** | 4 | Guias de busqueda predefinidas |
+| **Prompts** | 5 | Guias de busqueda predefinidas |
 
 ---
 
@@ -174,6 +174,14 @@ make inspect
 | `check_dataset_changes` | Verificar cambios en datasets vigilados |
 | `list_watched_datasets` | Listar datasets vigilados |
 
+#### Utilidades (3 herramientas)
+
+| Herramienta | Descripcion |
+|-------------|-------------|
+| `export_results` | **Nuevo**: Exportar resultados de busqueda a CSV o JSON |
+| `get_usage_stats` | **Nuevo**: Ver estadisticas de uso de herramientas y datasets |
+| `clear_usage_stats` | **Nuevo**: Limpiar estadisticas de uso |
+
 ---
 
 ## Resources (Recursos)
@@ -241,6 +249,20 @@ Asistente: [Usa get_related_datasets(dataset_id="...", top_k=10)]
 ```
 Usuario: Que formatos tiene disponible este dataset?
 Asistente: [Usa get_distributions(dataset_id="l01280066-presupuestos")]
+```
+
+### Exportar resultados de busqueda (nuevo)
+
+```
+Usuario: Exporta estos resultados a CSV
+Asistente: [Usa export_results(search_results="...", format="csv")]
+```
+
+### Ver estadisticas de uso (nuevo)
+
+```
+Usuario: Que herramientas he usado mas?
+Asistente: [Usa get_usage_stats(include_searches=true)]
 ```
 
 ## Configuracion en Clientes MCP
@@ -327,6 +349,8 @@ datos-gob-es-mcp/
 | **Paginacion paralela** | `fetch_all=True` descarga 5 paginas en paralelo | ~5x mas rapido |
 | **Descarga streaming** | `download_data` usa streaming para archivos grandes | Soporte hasta 50MB |
 | **Embeddings cacheados** | Indice semantico se guarda en disco | Primera busqueda ~30s, siguientes <1s |
+| **Metricas de uso** | Registro de herramientas y datasets mas usados | Optimizacion de workflows |
+| **Exportacion de resultados** | Exportar busquedas a CSV/JSON | Analisis externo de datos |
 
 ## Licencia
 

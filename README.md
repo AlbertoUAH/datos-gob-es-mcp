@@ -351,6 +351,7 @@ datos-gob-es-mcp/
 | **Embeddings cacheados** | Indice semantico se guarda en disco | Primera busqueda ~30s, siguientes <1s |
 | **Metricas de uso** | Registro de herramientas y datasets mas usados | Optimizacion de workflows |
 | **Exportacion de resultados** | Exportar busquedas a CSV/JSON | Analisis externo de datos |
+| **Filtro espacial mejorado** | Busca en campo spatial, titulo y URI | Encuentra datasets sin metadatos espaciales |
 
 ## Licencia
 

@@ -1767,7 +1767,13 @@ def _normalize_spatial_name(name: str, spatial_type: str) -> tuple[list[str], st
 
 
 def _filter_by_spatial(items: list[dict[str, Any]], spatial_value: str) -> list[dict[str, Any]]:
-    """Filter items by spatial coverage, checking if spatial_value appears in the spatial field."""
+    """Filter items by spatial coverage.
+
+    Checks multiple fields since many datasets don't have the 'spatial' field configured:
+    1. spatial field (primary)
+    2. title (fallback - many datasets include city/region in title)
+    3. URI (fallback - dataset IDs often include location names)
+    """
     if not spatial_value:
         return items
 
@@ -1803,16 +1809,28 @@ def _filter_by_spatial(items: list[dict[str, Any]], spatial_value: str) -> list[
 
     filtered = []
     for item in items:
+        # 1. Check spatial field (primary source)
         spatial = item.get("spatial", "")
         if isinstance(spatial, dict):
             spatial = spatial.get("_about", "")
         elif isinstance(spatial, list):
             spatial = " ".join(s.get("_about", "") if isinstance(s, dict) else str(s) for s in spatial)
 
-        spatial_text = spatial.lower()
+        # 2. Extract title text
+        title = item.get("title", "")
+        if isinstance(title, list) and title:
+            title = title[0].get("_value", "") if isinstance(title[0], dict) else str(title[0])
+        elif isinstance(title, dict):
+            title = title.get("_value", "")
 
-        # Check if any variant matches
-        if any(variant in spatial_text for variant in spatial_variants):
+        # 3. Get URI
+        uri = item.get("_about", "")
+
+        # Combine all text sources for matching
+        combined_text = f"{spatial} {title} {uri}".lower()
+
+        # Check if any variant matches in any of the fields
+        if any(variant in combined_text for variant in spatial_variants):
             filtered.append(item)
 
     return filtered

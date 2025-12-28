@@ -12,7 +12,7 @@ Este servidor MCP permite a asistentes de IA como Claude, ChatGPT y otros client
 
 ### Caracteristicas
 
-- **35+ herramientas MCP** para consultar multiples APIs de datos publicos
+- **29 herramientas MCP** para consultar multiples APIs de datos publicos
 - **13 recursos MCP** (9 estaticos + 4 templates dinamicos) para acceso directo a datos
 - **4 prompts MCP** para guias de busqueda detalladas
 - **Integraciones externas**:
@@ -21,6 +21,9 @@ Este servidor MCP permite a asistentes de IA como Claude, ChatGPT y otros client
   - **BOE**: Boletin Oficial del Estado
 - **Sistema de notificaciones**: Webhooks para detectar cambios en datasets
 - **Busqueda semantica**: Busqueda por significado usando embeddings
+- **Cache de metadatos**: Cache local de 24h para publishers, themes, provincias y regiones
+- **Paginacion paralela**: Descarga 5x mas rapida con `fetch_all=True`
+- **Descarga completa**: Tool `download_data` para obtener datasets completos (hasta 50MB)
 - Cliente HTTP asincrono con manejo robusto de errores
 - Modelos Pydantic para tipado seguro
 - Listo para desplegar en FastMCP Cloud
@@ -97,7 +100,7 @@ make inspect
 
 | Capacidad | Cantidad | Descripcion |
 |-----------|----------|-------------|
-| **Tools** | 35+ | Funciones que el LLM puede invocar |
+| **Tools** | 29 | Funciones que el LLM puede invocar |
 | **Resources** | 13 | Datos estaticos y dinamicos accesibles |
 | **Prompts** | 4 | Guias de busqueda predefinidas |
 
@@ -109,70 +112,66 @@ make inspect
 
 | Herramienta | Descripcion |
 |-------------|-------------|
-| `list_datasets` | Listar datasets con paginacion y ordenacion |
+| `search_datasets` | Busqueda unificada: filtros, semantica e hibrida. Soporta multi-tema con logica OR |
 | `get_dataset` | Obtener un dataset por su ID |
-| `search_datasets` | Busqueda unificada con multiples filtros |
-| `semantic_search` | Busqueda por significado usando IA |
-| `get_distributions` | Obtener archivos descargables |
+| `download_data` | **Nuevo**: Descargar datos completos de un dataset (hasta 50MB) |
+| `get_related_datasets` | **Nuevo**: Encontrar datasets similares usando IA (embeddings) |
+| `get_distributions` | Obtener archivos descargables de un dataset |
 
-### Metadatos (3 herramientas)
-
-| Herramienta | Descripcion |
-|-------------|-------------|
-| `list_publishers` | Listar todos los publicadores (organismos) |
-| `list_themes` | Listar todas las tematicas/categorias |
-| `list_spatial_coverage` | Listar opciones de cobertura geografica |
-
-### NTI - Norma Tecnica de Interoperabilidad (7 herramientas)
+### Metadatos (3 herramientas con cache 24h)
 
 | Herramienta | Descripcion |
 |-------------|-------------|
-| `list_public_sectors` | Listar sectores publicos |
-| `get_public_sector` | Obtener un sector publico por ID |
-| `list_provinces` | Listar provincias espanolas |
-| `get_province` | Obtener una provincia por nombre |
-| `list_autonomous_regions` | Listar Comunidades Autonomas |
-| `get_autonomous_region` | Obtener una Comunidad Autonoma por ID |
-| `get_country_spain` | Obtener informacion de Espana |
+| `list_publishers` | Listar todos los publicadores (organismos). Cache 24h |
+| `list_themes` | Listar todas las tematicas/categorias. Cache 24h |
+| `refresh_metadata_cache` | **Nuevo**: Forzar actualizacion del cache de metadatos |
 
-### INE - Instituto Nacional de Estadistica (4 herramientas)
+### NTI - Norma Tecnica de Interoperabilidad (3 herramientas con cache 24h)
 
 | Herramienta | Descripcion |
 |-------------|-------------|
-| `ine_search_operations` | Buscar operaciones estadisticas |
-| `ine_list_operations` | Listar todas las operaciones |
+| `list_public_sectors` | Listar sectores publicos. Cache 24h |
+| `list_provinces` | Listar provincias espanolas. Cache 24h |
+| `list_autonomous_regions` | Listar Comunidades Autonomas. Cache 24h |
+
+### Integraciones Externas
+
+#### INE - Instituto Nacional de Estadistica (4 herramientas)
+
+| Herramienta | Descripcion |
+|-------------|-------------|
+| `ine_list_operations` | Listar operaciones estadisticas |
+| `ine_search_operations` | Buscar operaciones por texto |
 | `ine_list_tables` | Listar tablas de una operacion |
 | `ine_get_data` | Obtener datos de una tabla |
 
-### AEMET - Meteorologia (4 herramientas)
-
-Requiere `AEMET_API_KEY` configurada.
+#### AEMET - Meteorologia (4 herramientas)
 
 | Herramienta | Descripcion |
 |-------------|-------------|
-| `aemet_get_forecast` | Prevision meteorologica por municipio |
-| `aemet_get_observations` | Observaciones actuales de estaciones |
 | `aemet_list_stations` | Listar estaciones meteorologicas |
-| `aemet_list_municipalities` | Listar municipios con datos |
+| `aemet_list_municipalities` | Listar municipios |
+| `aemet_get_observations` | Obtener observaciones de una estacion |
+| `aemet_get_forecast` | Obtener prediccion para un municipio |
 
-### BOE - Boletin Oficial del Estado (4 herramientas)
-
-| Herramienta | Descripcion |
-|-------------|-------------|
-| `boe_get_summary` | Sumario del BOE de una fecha |
-| `boe_get_document` | Obtener un documento especifico |
-| `boe_search` | Buscar en el BOE |
-| `boe_get_today` | Obtener el BOE de hoy |
-
-### Webhooks y Notificaciones (6 herramientas)
+#### BOE - Boletin Oficial del Estado (4 herramientas)
 
 | Herramienta | Descripcion |
 |-------------|-------------|
-| `webhook_register` | Registrar webhook para notificaciones |
+| `boe_get_today` | Obtener sumario del BOE de hoy |
+| `boe_get_summary` | Obtener sumario de una fecha |
+| `boe_get_document` | Obtener documento por ID |
+| `boe_search` | Buscar documentos |
+
+#### Webhooks - Notificaciones (5 herramientas)
+
+| Herramienta | Descripcion |
+|-------------|-------------|
+| `webhook_register` | Registrar webhook para un dataset |
 | `webhook_list` | Listar webhooks registrados |
-| `webhook_delete` | Eliminar un webhook |
-| `webhook_test` | Probar un webhook |
-| `check_dataset_changes` | Verificar cambios en un dataset |
+| `webhook_delete` | Eliminar webhook |
+| `webhook_test` | Probar webhook |
+| `check_dataset_changes` | Verificar cambios en datasets vigilados |
 | `list_watched_datasets` | Listar datasets vigilados |
 
 ---
@@ -202,32 +201,46 @@ Requiere `AEMET_API_KEY` configurada.
 
 ## Ejemplos de Uso
 
-### Buscar estadisticas del INE
+### Buscar datasets por texto
 
 ```
-Usuario: Busca estadisticas de empleo en el INE
-Asistente: [Usa ine_search_operations("empleo")]
+Usuario: Busca datasets sobre empleo en Andalucia
+Asistente: [Usa search_datasets(title="empleo", spatial_type="Autonomia", spatial_value="Andalucia")]
 ```
 
-### Obtener prevision meteorologica
+### Buscar por significado (semantica)
 
 ```
-Usuario: Cual es la prevision del tiempo para Madrid?
-Asistente: [Usa aemet_get_forecast("28079")]
+Usuario: Encuentra datos sobre desempleo juvenil
+Asistente: [Usa search_datasets(semantic_query="desempleo juvenil")]
 ```
 
-### Consultar el BOE
+### Buscar por multiples temas (nuevo)
 
 ```
-Usuario: Que se publico en el BOE hoy?
-Asistente: [Usa boe_get_today()]
+Usuario: Busca datasets de economia o hacienda
+Asistente: [Usa search_datasets(themes=["economia", "hacienda"])]
 ```
 
-### Configurar notificaciones
+### Descargar datos completos (nuevo)
 
 ```
-Usuario: Avisame cuando cambie el dataset de presupuestos
-Asistente: [Usa webhook_register(webhook_url="https://mi-servidor.com/notify", dataset_id="presupuestos-2024")]
+Usuario: Descarga los datos del dataset de presupuestos
+Asistente: [Usa download_data(dataset_id="l01280066-presupuestos", max_mb=20)]
+```
+
+### Encontrar datasets relacionados (nuevo)
+
+```
+Usuario: Encuentra datasets similares a este de poblacion
+Asistente: [Usa get_related_datasets(dataset_id="...", top_k=10)]
+```
+
+### Obtener distribuciones de un dataset
+
+```
+Usuario: Que formatos tiene disponible este dataset?
+Asistente: [Usa get_distributions(dataset_id="l01280066-presupuestos")]
 ```
 
 ## Configuracion en Clientes MCP
@@ -241,10 +254,7 @@ Anade a tu archivo de configuracion `claude_desktop_config.json`:
   "mcpServers": {
     "datos-gob-es": {
       "command": "mcp",
-      "args": ["run", "/ruta/a/datos-gob-es-mcp/server.py"],
-      "env": {
-        "AEMET_API_KEY": "tu_api_key_aqui"
-      }
+      "args": ["run", "/ruta/a/datos-gob-es-mcp/server.py"]
     }
   }
 }
@@ -306,6 +316,17 @@ datos-gob-es-mcp/
 | INE | No | [ine.es/dyngs/DataLab](https://www.ine.es/dyngs/DataLab/es/manual.html) |
 | AEMET | Si (gratis) | [opendata.aemet.es](https://opendata.aemet.es/dist/index.html) |
 | BOE | No | [boe.es/datosabiertos](https://www.boe.es/datosabiertos/) |
+
+## Rendimiento
+
+### Optimizaciones implementadas
+
+| Mejora | Descripcion | Impacto |
+|--------|-------------|---------|
+| **Cache de metadatos** | Publishers, themes, provincias y regiones se cachean 24h | Respuestas instantaneas en llamadas repetidas |
+| **Paginacion paralela** | `fetch_all=True` descarga 5 paginas en paralelo | ~5x mas rapido |
+| **Descarga streaming** | `download_data` usa streaming para archivos grandes | Soporte hasta 50MB |
+| **Embeddings cacheados** | Indice semantico se guarda en disco | Primera busqueda ~30s, siguientes <1s |
 
 ## Licencia
 

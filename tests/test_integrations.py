@@ -194,8 +194,10 @@ class TestAEMETClient:
         assert stations[0]["indicativo"] == "3129"
 
     @pytest.mark.asyncio
-    async def test_aemet_no_api_key(self):
+    async def test_aemet_no_api_key(self, monkeypatch):
         """Test AEMET client without API key."""
+        # Remove AEMET_API_KEY from environment for this test
+        monkeypatch.delenv("AEMET_API_KEY", raising=False)
         client = AEMETClient(api_key=None)
 
         with pytest.raises(AEMETClientError) as exc_info:

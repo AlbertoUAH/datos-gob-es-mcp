@@ -3,20 +3,14 @@
 import json
 import pytest
 from server import (
-    list_datasets,
     get_dataset,
     search_datasets,
     get_distributions,
     list_publishers,
     list_themes,
-    list_spatial_coverage,
     list_public_sectors,
-    get_public_sector,
     list_provinces,
-    get_province,
     list_autonomous_regions,
-    get_autonomous_region,
-    get_country_spain,
 )
 
 
@@ -29,26 +23,6 @@ def get_tool_fn(tool):
 
 class TestDatasetTools:
     """Tests for dataset-related MCP tools."""
-
-    @pytest.mark.asyncio
-    async def test_list_datasets(self, mock_api):
-        """Test list_datasets tool."""
-        fn = get_tool_fn(list_datasets)
-        result = await fn()
-        data = json.loads(result)
-
-        assert "datasets" in data
-        assert "total_in_page" in data
-        assert "page" in data
-
-    @pytest.mark.asyncio
-    async def test_list_datasets_with_pagination(self, mock_api):
-        """Test list_datasets with custom pagination."""
-        fn = get_tool_fn(list_datasets)
-        result = await fn(page=1, sort="-issued")
-        data = json.loads(result)
-
-        assert "datasets" in data
 
     @pytest.mark.asyncio
     async def test_get_dataset(self, mock_api):
@@ -178,21 +152,13 @@ class TestMetadataTools:
         data = json.loads(result)
 
         assert "items" in data
-        assert "total_in_page" in data
+        # Response format varies based on cache: "total_items" (cached) or "total_in_page" (API)
+        assert "total_items" in data or "total_in_page" in data
 
     @pytest.mark.asyncio
     async def test_list_themes(self, mock_api):
         """Test list_themes tool."""
         fn = get_tool_fn(list_themes)
-        result = await fn()
-        data = json.loads(result)
-
-        assert "items" in data
-
-    @pytest.mark.asyncio
-    async def test_list_spatial_coverage(self, mock_api):
-        """Test list_spatial_coverage tool."""
-        fn = get_tool_fn(list_spatial_coverage)
         result = await fn()
         data = json.loads(result)
 
@@ -212,15 +178,6 @@ class TestNTITools:
         assert "items" in data
 
     @pytest.mark.asyncio
-    async def test_get_public_sector(self, mock_api):
-        """Test get_public_sector tool."""
-        fn = get_tool_fn(get_public_sector)
-        result = await fn("comercio")
-        data = json.loads(result)
-
-        assert "items" in data
-
-    @pytest.mark.asyncio
     async def test_list_provinces(self, mock_api):
         """Test list_provinces tool."""
         fn = get_tool_fn(list_provinces)
@@ -230,36 +187,9 @@ class TestNTITools:
         assert "items" in data
 
     @pytest.mark.asyncio
-    async def test_get_province(self, mock_api):
-        """Test get_province tool."""
-        fn = get_tool_fn(get_province)
-        result = await fn("Madrid")
-        data = json.loads(result)
-
-        assert "items" in data
-
-    @pytest.mark.asyncio
     async def test_list_autonomous_regions(self, mock_api):
         """Test list_autonomous_regions tool."""
         fn = get_tool_fn(list_autonomous_regions)
-        result = await fn()
-        data = json.loads(result)
-
-        assert "items" in data
-
-    @pytest.mark.asyncio
-    async def test_get_autonomous_region(self, mock_api):
-        """Test get_autonomous_region tool."""
-        fn = get_tool_fn(get_autonomous_region)
-        result = await fn("Comunidad-Madrid")
-        data = json.loads(result)
-
-        assert "items" in data
-
-    @pytest.mark.asyncio
-    async def test_get_country_spain(self, mock_api):
-        """Test get_country_spain tool."""
-        fn = get_tool_fn(get_country_spain)
         result = await fn()
         data = json.loads(result)
 
@@ -274,12 +204,13 @@ class TestToolErrorHandling:
         """Test that tools return error as JSON when API fails."""
         import respx
 
-        fn = get_tool_fn(list_datasets)
+        # Use list_publishers with use_cache=False to force API call
+        fn = get_tool_fn(list_publishers)
 
         with respx.mock:
             respx.get(url__regex=r".*").respond(status_code=500, json={"error": "Server error"})
 
-            result = await fn()
+            result = await fn(use_cache=False)
             data = json.loads(result)
 
             assert "error" in data

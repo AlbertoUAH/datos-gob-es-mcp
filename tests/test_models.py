@@ -11,7 +11,7 @@ class TestPaginationParams:
         """Test default pagination values."""
         params = PaginationParams()
         assert params.page == 0
-        assert params.page_size == 200
+        assert params.page_size == 50  # DEFAULT_PAGE_SIZE
         assert params.sort is None
 
     def test_custom_values(self):
@@ -32,9 +32,9 @@ class TestPaginationParams:
             PaginationParams(page_size=0)
 
     def test_page_size_validation_max(self):
-        """Test that page_size above 200 raises validation error."""
+        """Test that page_size above 50 raises validation error."""
         with pytest.raises(ValueError):
-            PaginationParams(page_size=201)
+            PaginationParams(page_size=51)
 
 
 class TestDatasetSummary:

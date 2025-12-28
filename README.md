@@ -4,27 +4,34 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
 
-Servidor MCP (Model Context Protocol) para acceder al catalogo de datos abiertos de Espana a traves de la API de **datos.gob.es**, con integraciones adicionales para **INE**, **AEMET** y **BOE**.
+**Hub de OpenData Espanol** - Servidor MCP (Model Context Protocol) que unifica el acceso a las principales fuentes de datos abiertos de Espana en una sola interfaz.
 
 ## Descripcion
 
-Este servidor MCP permite a asistentes de IA como Claude, ChatGPT y otros clientes compatibles con MCP buscar y explorar los miles de datasets publicos disponibles en el portal de datos abiertos del Gobierno de Espana.
+Este servidor MCP actua como un **hub centralizado** que conecta multiples APIs de datos publicos espanoles, permitiendo a asistentes de IA como Claude, ChatGPT y otros clientes MCP acceder a toda la informacion desde un unico punto.
+
+### Fuentes de datos integradas
+
+| Fuente | Descripcion | Auth | Documentacion |
+|--------|-------------|------|---------------|
+| **[datos.gob.es](https://datos.gob.es/)** | Catalogo nacional de datos abiertos (+40.000 datasets) | No | [API](https://datos.gob.es/es/accessible-apidata) |
+| **[INE](https://www.ine.es/)** | Instituto Nacional de Estadistica | No | [API](https://www.ine.es/dyngs/DataLab/es/manual.html) |
+| **[AEMET](https://opendata.aemet.es/)** | Agencia Estatal de Meteorologia | API key | [API](https://opendata.aemet.es/dist/index.html) |
+| **[BOE](https://www.boe.es/)** | Boletin Oficial del Estado | No | [API](https://www.boe.es/datosabiertos/) |
 
 ### Caracteristicas
 
 - **32 herramientas MCP** para consultar multiples APIs de datos publicos
 - **13 recursos MCP** (9 estaticos + 4 templates dinamicos) para acceso directo a datos
 - **5 prompts MCP** para guias de busqueda detalladas
-- **Integraciones externas**:
-  - **INE**: Estadisticas oficiales de Espana
-  - **AEMET**: Datos meteorologicos (requiere API key gratuita)
-  - **BOE**: Boletin Oficial del Estado
 - **Sistema de notificaciones**: Webhooks para detectar cambios en datasets
-- **Busqueda semantica**: Busqueda por significado usando embeddings
-- **Cache de metadatos**: Cache local de 24h para publishers, themes, provincias y regiones
+- **Busqueda semantica**: Busqueda por significado usando embeddings (IA)
+- **Busqueda espacial inteligente**: Filtra por ubicacion usando metadatos, titulos y URIs
+- **Cache de metadatos**: Cache local de 24h para respuestas instantaneas
 - **Paginacion paralela**: Descarga 5x mas rapida con `fetch_all=True`
-- **Descarga completa**: Tool `download_data` para obtener datasets completos (hasta 50MB)
-- Cliente HTTP asincrono con manejo robusto de errores
+- **Descarga completa**: Obtener datasets completos (hasta 50MB)
+- **Exportacion**: Exportar resultados a CSV/JSON
+- Cliente HTTP asincrono con rate limiting por API
 - Modelos Pydantic para tipado seguro
 - Listo para desplegar en FastMCP Cloud
 
@@ -330,15 +337,6 @@ datos-gob-es-mcp/
 └── README.md
 ```
 
-## APIs Integradas
-
-| API | Autenticacion | Documentacion |
-|-----|---------------|---------------|
-| datos.gob.es | No | [datos.gob.es/apidata](https://datos.gob.es/es/accessible-apidata) |
-| INE | No | [ine.es/dyngs/DataLab](https://www.ine.es/dyngs/DataLab/es/manual.html) |
-| AEMET | Si (gratis) | [opendata.aemet.es](https://opendata.aemet.es/dist/index.html) |
-| BOE | No | [boe.es/datosabiertos](https://www.boe.es/datosabiertos/) |
-
 ## Rendimiento
 
 ### Optimizaciones implementadas
@@ -363,9 +361,5 @@ Las contribuciones son bienvenidas. Por favor, abre un issue o pull request en e
 
 ## Enlaces
 
-- [datos.gob.es](https://datos.gob.es/) - Portal de datos abiertos del Gobierno de Espana
 - [Model Context Protocol](https://modelcontextprotocol.io/) - Especificacion MCP
 - [FastMCP](https://github.com/jlowin/fastmcp) - Framework para servidores MCP
-- [INE](https://www.ine.es/) - Instituto Nacional de Estadistica
-- [AEMET OpenData](https://opendata.aemet.es/) - Datos meteorologicos abiertos
-- [BOE](https://www.boe.es/) - Boletin Oficial del Estado

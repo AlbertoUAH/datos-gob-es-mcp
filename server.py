@@ -86,7 +86,6 @@ class DatasetSummary(BaseModel):
     id: str | None = None  # Short dataset ID extracted from URI
     title: str | list[str] | None = None
     description: str | list[str] | None = None
-    publisher: str | dict[str, Any] | None = None
     publisher_name: str | None = None  # Human-readable publisher name
     theme: list[str] | str | None = None
     keywords: list[str] | None = None
@@ -112,6 +111,9 @@ class DatasetSummary(BaseModel):
         """
         title = cls._extract_text(item.get("title"), lang)
         description = cls._extract_text(item.get("description"), lang)
+        # Truncate long descriptions to reduce payload size
+        if description and isinstance(description, str) and len(description) > 200:
+            description = description[:197] + "..."
 
         distributions = item.get("distribution", [])
         if isinstance(distributions, dict):
@@ -153,7 +155,6 @@ class DatasetSummary(BaseModel):
             id=dataset_id,
             title=title,
             description=description,
-            publisher=publisher,
             publisher_name=publisher_name,
             theme=theme,
             keywords=keywords,
@@ -1309,7 +1310,7 @@ def _handle_error(e: Exception) -> str:
 
 async def _fetch_all_pages(
     fetch_fn,
-    max_results: int = 500,
+    max_results: int = 100,
     sort: str | None = None,
     parallel_pages: int = 5,
     **kwargs,
@@ -2736,7 +2737,7 @@ async def search_datasets(
     sort: str | None = None,
     lang: str | None = "es",
     fetch_all: bool = False,
-    max_results: int = 500,
+    max_results: int = 100,
     include_preview: bool = True,
     preview_rows: int = 10,
     semantic_query: str | None = None,

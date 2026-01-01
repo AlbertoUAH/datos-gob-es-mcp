@@ -8,7 +8,9 @@ import json
 from datetime import datetime
 from typing import Any
 
-from core import HTTPClient
+from core import HTTPClient, get_logger
+
+logger = get_logger("boe")
 
 
 class BOEClientError(Exception):
@@ -146,8 +148,9 @@ class BOEClient:
 boe_client = BOEClient()
 
 
-def _handle_error(e: Exception) -> str:
-    """Format error message."""
+def _handle_error(e: Exception, context: str = "boe_operation") -> str:
+    """Format and log error message."""
+    logger.warning("boe_error", context=context, error=str(e))
     if isinstance(e, BOEClientError):
         return json.dumps({"error": e.message, "status_code": e.status_code}, ensure_ascii=False)
     return json.dumps({"error": str(e)}, ensure_ascii=False)
@@ -243,11 +246,40 @@ def register_boe_tools(mcp):
             JSON with BOE summary including sections, departments, and document titles.
         """
         try:
+            # Validate date format
+            if not date or len(date) != 8 or not date.isdigit():
+                return json.dumps({
+                    "error": "Invalid date format. Use YYYYMMDD (e.g., '20241226')",
+                    "provided": date,
+                }, ensure_ascii=False, indent=2)
+
+            # Validate it's a real date
+            try:
+                parsed_date = datetime.strptime(date, "%Y%m%d")
+                # Check if weekend
+                if parsed_date.weekday() >= 5:  # 5=Saturday, 6=Sunday
+                    return json.dumps({
+                        "warning": f"Date {date} is a weekend. BOE is not published on weekends.",
+                        "suggestion": "Try a weekday date instead.",
+                    }, ensure_ascii=False, indent=2)
+            except ValueError:
+                return json.dumps({
+                    "error": f"Invalid date: {date}. Check year, month, and day values.",
+                }, ensure_ascii=False, indent=2)
+
             data = await boe_client.get_summary(date)
             formatted = _format_summary(data)
             return json.dumps(formatted, ensure_ascii=False, indent=2)
+        except BOEClientError as e:
+            if e.status_code == 404 or "404" in str(e):
+                return json.dumps({
+                    "error": f"No BOE available for date {date}",
+                    "reason": "This date may be a public holiday or the BOE was not published.",
+                    "suggestion": "Try boe_get_today to get the most recent BOE.",
+                }, ensure_ascii=False, indent=2)
+            return _handle_error(e, context="boe_get_summary")
         except Exception as e:
-            return _handle_error(e)
+            return _handle_error(e, context="boe_get_summary")
 
     @mcp.tool()
     async def boe_get_document(document_id: str) -> str:
@@ -289,71 +321,76 @@ def register_boe_tools(mcp):
         Returns:
             JSON with matching documents including IDs and titles.
         """
+        import asyncio
+        from datetime import timedelta
+
         try:
-            # For search, we'll get recent summaries and filter
-            # since BOE doesn't have a direct search API in the same format
+            # Calculate days to search
             days_to_search = 30
             if date_from and date_to:
-                # Calculate days between dates
-                from datetime import datetime
                 d1 = datetime.strptime(date_from, "%Y%m%d")
                 d2 = datetime.strptime(date_to, "%Y%m%d")
                 days_to_search = min((d2 - d1).days + 1, 90)
 
-            # Get summaries and search within them
+            # Get starting point
+            current = datetime.strptime(date_to, "%Y%m%d") if date_to else datetime.now()
+
+            # Build list of dates to search
+            dates_to_check = []
+            for i in range(days_to_search):
+                check_date = current - timedelta(days=i)
+                date_str = check_date.strftime("%Y%m%d")
+                if date_from and date_str < date_from:
+                    break
+                dates_to_check.append(date_str)
+
+            # Fetch summaries in parallel (batches of 5 to avoid overwhelming the API)
+            async def fetch_summary(date_str: str) -> dict | None:
+                try:
+                    summary = await boe_client.get_summary(date_str)
+                    return _format_summary(summary)
+                except BOEClientError:
+                    return None
+
+            # Process in batches
+            batch_size = 5
+            all_summaries = []
+            for i in range(0, len(dates_to_check), batch_size):
+                batch = dates_to_check[i:i + batch_size]
+                batch_results = await asyncio.gather(*[fetch_summary(d) for d in batch])
+                all_summaries.extend([(dates_to_check[i + j], r) for j, r in enumerate(batch_results) if r])
+
+            # Search in all summaries
             results = []
             query_lower = query.lower()
 
-            # Get today's date or date_to as starting point
-            if date_to:
-                current = datetime.strptime(date_to, "%Y%m%d")
-            else:
-                current = datetime.now()
-
-            for i in range(days_to_search):
-                check_date = current.replace(day=current.day - i) if i > 0 else current
-                try:
-                    # Handle month/year boundaries
-                    from datetime import timedelta
-                    check_date = current - timedelta(days=i)
-                    date_str = check_date.strftime("%Y%m%d")
-
-                    if date_from and date_str < date_from:
-                        break
-
-                    summary = await boe_client.get_summary(date_str)
-                    formatted = _format_summary(summary)
-
-                    # Search in sections
-                    for seccion in formatted.get("secciones", []):
-                        for dept in seccion.get("departamentos", []):
-                            for epigrafe in dept.get("epigrafes", []):
-                                titulo = epigrafe.get("titulo", "")
-                                if query_lower in titulo.lower():
-                                    results.append({
-                                        "id": epigrafe.get("id"),
-                                        "titulo": titulo,
-                                        "fecha": formatted.get("fecha"),
-                                        "seccion": seccion.get("nombre"),
-                                        "departamento": dept.get("nombre"),
-                                    })
-
-                except BOEClientError:
-                    continue
-
-                if len(results) >= 50:  # Limit results
-                    break
+            for date_str, formatted in all_summaries:
+                for seccion in formatted.get("secciones", []):
+                    for dept in seccion.get("departamentos", []):
+                        for epigrafe in dept.get("epigrafes", []):
+                            titulo = epigrafe.get("titulo", "")
+                            if query_lower in titulo.lower():
+                                results.append({
+                                    "id": epigrafe.get("id"),
+                                    "titulo": titulo,
+                                    "fecha": formatted.get("fecha"),
+                                    "seccion": seccion.get("nombre"),
+                                    "departamento": dept.get("nombre"),
+                                })
+                                if len(results) >= 50:
+                                    break
 
             output = {
                 "query": query,
                 "date_from": date_from,
                 "date_to": date_to,
+                "days_searched": len(dates_to_check),
                 "total_results": len(results),
-                "documents": results,
+                "documents": results[:50],
             }
             return json.dumps(output, ensure_ascii=False, indent=2)
         except Exception as e:
-            return _handle_error(e)
+            return _handle_error(e, context="boe_search")
 
     @mcp.tool()
     async def boe_get_today() -> str:
@@ -368,20 +405,33 @@ def register_boe_tools(mcp):
         """
         try:
             # Try today and previous days until we find a BOE
-            from datetime import datetime, timedelta
+            from datetime import timedelta
+
+            today = datetime.now()
+            dates_tried = []
 
             for i in range(7):  # Try up to 7 days back
-                date = datetime.now() - timedelta(days=i)
+                date = today - timedelta(days=i)
                 date_str = date.strftime("%Y%m%d")
+                dates_tried.append(date_str)
                 try:
                     data = await boe_client.get_summary(date_str)
                     if data:
                         formatted = _format_summary(data)
-                        formatted["note"] = f"BOE del {date.strftime('%d/%m/%Y')}"
+                        if i == 0:
+                            formatted["note"] = f"BOE de hoy ({date.strftime('%d/%m/%Y')})"
+                        else:
+                            formatted["note"] = f"BOE mas reciente: {date.strftime('%d/%m/%Y')} (hace {i} dias)"
                         return json.dumps(formatted, ensure_ascii=False, indent=2)
-                except BOEClientError:
+                except BOEClientError as e:
+                    logger.info("boe_date_not_available", date=date_str, error=str(e))
                     continue
 
-            return json.dumps({"error": "No BOE available in the last 7 days"}, ensure_ascii=False)
+            return json.dumps({
+                "error": "No BOE available in the last 7 days",
+                "dates_tried": dates_tried,
+                "today": today.strftime("%Y%m%d"),
+                "reason": "This may happen during extended holiday periods (e.g., Christmas, New Year).",
+            }, ensure_ascii=False, indent=2)
         except Exception as e:
-            return _handle_error(e)
+            return _handle_error(e, context="boe_get_today")

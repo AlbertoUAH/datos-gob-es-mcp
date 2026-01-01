@@ -1,5 +1,6 @@
 """Rate limiting for API requests using aiolimiter."""
 
+import asyncio
 import os
 from typing import ClassVar
 
@@ -8,6 +9,16 @@ from aiolimiter import AsyncLimiter
 from .logging import get_logger
 
 logger = get_logger("ratelimit")
+
+
+class RateLimitExceededError(Exception):
+    """Exception raised when rate limit is exceeded and timeout occurs."""
+
+    def __init__(self, api_name: str, timeout: float):
+        self.api_name = api_name
+        self.timeout = timeout
+        self.message = f"Rate limit exceeded for {api_name}. Waited {timeout}s. Try again later."
+        super().__init__(self.message)
 
 
 # Default rate limits (requests per second)
@@ -74,16 +85,29 @@ class RateLimiter:
         return cls._limiters[api_name]
 
     @classmethod
-    async def acquire(cls, api_name: str) -> None:
+    async def acquire(cls, api_name: str, timeout: float = 30.0) -> None:
         """Acquire a rate limit token for the specified API.
 
         This method will wait if the rate limit has been reached.
+        If waiting exceeds the timeout, raises RateLimitExceededError.
 
         Args:
             api_name: Name of the API to acquire a token for.
+            timeout: Maximum time to wait for rate limit (default 30s).
+
+        Raises:
+            RateLimitExceededError: If timeout is exceeded while waiting.
         """
         limiter = cls.get_limiter(api_name)
-        await limiter.acquire()
+        try:
+            await asyncio.wait_for(limiter.acquire(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "rate_limit_timeout",
+                api=api_name,
+                timeout=timeout,
+            )
+            raise RateLimitExceededError(api_name, timeout)
 
     @classmethod
     def reset(cls, api_name: str | None = None) -> None:

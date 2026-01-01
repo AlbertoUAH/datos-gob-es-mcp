@@ -519,7 +519,8 @@ class EmbeddingIndex:
             self.dataset_descriptions = cache_data.get("dataset_descriptions", [])
             self._initialized = True
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("embedding_cache_load_failed", error=str(e))
             return False
 
     def _save_cache(self):
@@ -1011,9 +1012,9 @@ class UsageMetrics:
                     self.dataset_accesses = data.get("dataset_accesses", {})
                     # Keep only last 100 search queries
                     self.search_queries = data.get("search_queries", [])[-100:]
-        except Exception:
+        except Exception as e:
             # Start fresh if load fails
-            pass
+            logger.warning("metrics_load_failed", error=str(e))
 
     def _save_metrics(self) -> None:
         """Save metrics to disk."""
@@ -1027,8 +1028,8 @@ class UsageMetrics:
             }
             with open(self.METRICS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("metrics_save_failed", error=str(e))
 
     def record_tool_call(self, tool_name: str) -> None:
         """Record a tool invocation."""
@@ -1308,7 +1309,7 @@ def _handle_error(e: Exception) -> str:
 
 async def _fetch_all_pages(
     fetch_fn,
-    max_results: int = 2000,
+    max_results: int = 500,
     sort: str | None = None,
     parallel_pages: int = 5,
     **kwargs,
@@ -1686,6 +1687,8 @@ def _get_keyword_translations(keyword: str, spatial_value: str | None) -> list[s
     """Get keyword translations for bilingual regions.
 
     Returns a list of keywords to search, including translations for the region.
+    Only adds translations when spatial_value is provided to avoid timeout
+    from too many API calls.
     """
     keywords = [keyword]
     normalized_kw = normalize_text(keyword.lower())
@@ -1696,8 +1699,9 @@ def _get_keyword_translations(keyword: str, spatial_value: str | None) -> list[s
     translations = KEYWORD_TRANSLATIONS[normalized_kw]
 
     if not spatial_value:
-        # No spatial filter, return all translations
-        keywords.extend(translations)
+        # No spatial filter - only return original keyword to avoid timeout
+        # Adding all translations causes 8+ API calls which times out
+        return keywords
     else:
         spatial_lower = spatial_value.lower()
         spatial_normalized = normalize_text(spatial_lower)
@@ -1843,7 +1847,7 @@ async def _search_by_keywords_combined(
     """Search datasets by multiple keywords using both keyword and title endpoints.
 
     Combines results from keyword search and title search to get comprehensive results.
-    Deduplicates results by URI.
+    Deduplicates results by URI. Uses parallel requests for better performance.
 
     Args:
         keywords: List of keywords to search for.
@@ -1855,30 +1859,43 @@ async def _search_by_keywords_combined(
     all_items: list[dict[str, Any]] = []
     existing_uris: set[str] = set()
 
-    for kw in keywords:
+    # Build list of coroutines for parallel execution
+    async def search_keyword(kw: str) -> list[dict[str, Any]]:
         kw_normalized = normalize_text(kw)
-
-        # Search by keyword endpoint
+        items = []
         try:
             kw_data = await client.get_datasets_by_keyword(kw_normalized, pagination)
-            for item in kw_data.get("result", {}).get("items", []):
-                uri = item.get("_about")
-                if uri and uri not in existing_uris:
-                    all_items.append(item)
-                    existing_uris.add(uri)
-        except Exception:
-            pass
+            items.extend(kw_data.get("result", {}).get("items", []))
+        except Exception as e:
+            logger.warning("keyword_search_failed", keyword=kw_normalized, error=str(e))
+        return items
 
-        # Also search by title endpoint (catches datasets where keyword is in title)
+    async def search_title(kw: str) -> list[dict[str, Any]]:
+        kw_normalized = normalize_text(kw)
+        items = []
         try:
             title_data = await client.search_datasets_by_title(kw_normalized, pagination)
-            for item in title_data.get("result", {}).get("items", []):
+            items.extend(title_data.get("result", {}).get("items", []))
+        except Exception as e:
+            logger.warning("title_search_failed", keyword=kw_normalized, error=str(e))
+        return items
+
+    # Execute all searches in parallel
+    tasks = []
+    for kw in keywords:
+        tasks.append(search_keyword(kw))
+        tasks.append(search_title(kw))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Deduplicate results
+    for result in results:
+        if isinstance(result, list):
+            for item in result:
                 uri = item.get("_about")
                 if uri and uri not in existing_uris:
                     all_items.append(item)
                     existing_uris.add(uri)
-        except Exception:
-            pass
 
     return all_items
 
@@ -1891,6 +1908,56 @@ def _normalize_preview_rows(preview_rows: int) -> int:
 def _build_filters_dict(**kwargs: Any) -> dict[str, Any]:
     """Build a dictionary of non-None filter values."""
     return {k: v for k, v in kwargs.items() if v is not None}
+
+
+def _validate_date(date_str: str | None, param_name: str) -> str | None:
+    """Validate and normalize date string.
+
+    Accepts formats:
+    - ISO format: YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS, YYYY-MM-DDTHH:MM:SSZ
+    - Compact format: YYYYMMDD
+
+    Args:
+        date_str: Date string to validate.
+        param_name: Parameter name for error messages.
+
+    Returns:
+        Normalized date string (ISO format) or None if input is None.
+
+    Raises:
+        ValueError: If date format is invalid.
+    """
+    if not date_str:
+        return None
+
+    # Try ISO format first
+    try:
+        # Handle various ISO formats
+        normalized = date_str.replace('Z', '+00:00')
+        if 'T' in normalized:
+            from datetime import datetime
+            datetime.fromisoformat(normalized)
+        else:
+            from datetime import datetime
+            # Try YYYY-MM-DD
+            datetime.strptime(date_str, "%Y-%m-%d")
+        return date_str
+    except ValueError:
+        pass
+
+    # Try compact format YYYYMMDD
+    if len(date_str) == 8 and date_str.isdigit():
+        try:
+            from datetime import datetime
+            dt = datetime.strptime(date_str, "%Y%m%d")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    raise ValueError(
+        f"Invalid {param_name} format: '{date_str}'. "
+        f"Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ) or compact format (YYYYMMDD)."
+    )
 
 
 def _normalize_format(format_str: str | None, media_type: str | None) -> str | None:
@@ -2576,8 +2643,8 @@ async def _add_previews_to_dataset_list(
                         if preview and not preview.error:
                             ds["preview"] = preview.model_dump(exclude_none=True)
                             break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("preview_fetch_failed", dataset_uri=ds.get("uri"), error=str(e))
         else:
             # For filter/hybrid results, distributions are already in the dataset
             distributions = ds.get("distributions", [])
@@ -2669,7 +2736,7 @@ async def search_datasets(
     sort: str | None = None,
     lang: str | None = "es",
     fetch_all: bool = False,
-    max_results: int = 2000,
+    max_results: int = 500,
     include_preview: bool = True,
     preview_rows: int = 10,
     semantic_query: str | None = None,
@@ -2705,7 +2772,7 @@ async def search_datasets(
         sort: Sort field. Use '-' prefix for descending. Examples: '-modified' (newest first), 'title', '-issued'.
         lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'. Use None for all.
         fetch_all: If True, fetches all pages automatically up to max_results.
-        max_results: Maximum results when fetch_all=True (default 2000, max 10000).
+        max_results: Maximum results when fetch_all=True (default 500, max 10000).
         include_preview: Include data preview (first rows) for CSV/JSON/TSV datasets. Default True.
         preview_rows: Number of preview rows (default 10, max 50). Only used if include_preview=True.
         semantic_query: Natural language query for AI-powered semantic search (e.g., "unemployment data in coastal cities"). First use may take 30-60s to build index.
@@ -2726,6 +2793,10 @@ async def search_datasets(
     })
 
     try:
+        # Validate date formats first
+        date_start = _validate_date(date_start, "date_start")
+        date_end = _validate_date(date_end, "date_end")
+
         max_results = min(max_results, 10000)  # Safety limit
         semantic_top_k = min(semantic_top_k, 100)  # Safety limit
         pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
@@ -2949,8 +3020,8 @@ async def search_datasets(
                     data = await client.get_datasets_by_spatial(spatial_type, variant, pagination)
                     items = data.get("result", {}).get("items", [])
                     all_items.extend(items)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("spatial_search_failed", spatial_type=spatial_type, variant=variant, error=str(e))
 
             # Also try at Autonomia level if searching by Provincia
             if related_autonomy and spatial_type.lower() == "provincia":
@@ -2962,8 +3033,8 @@ async def search_datasets(
                     for item in autonomy_items:
                         if item.get("_about") not in existing_uris:
                             all_items.append(item)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("autonomy_search_failed", autonomy=related_autonomy, error=str(e))
 
             # Build combined result
             data = {"result": {"items": all_items, "page": 0, "itemsPerPage": len(all_items)}}
@@ -2990,13 +3061,45 @@ async def search_datasets(
         elif keyword:
             # Search by keyword AND by title to get comprehensive results
             keywords_to_search = _get_keyword_translations(keyword, spatial_value)
-            all_items = await _search_by_keywords_combined(keywords_to_search, pagination)
+
+            if fetch_all:
+                # Fetch multiple pages for keyword search
+                all_items: list[dict[str, Any]] = []
+                existing_uris: set[str] = set()
+                current_page = 0
+                max_pages = 20  # Limit to prevent excessive API calls
+
+                while len(all_items) < max_results and current_page < max_pages:
+                    page_pagination = PaginationParams(page=current_page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
+                    page_items = await _search_by_keywords_combined(keywords_to_search, page_pagination)
+
+                    if not page_items:
+                        break
+
+                    # Deduplicate
+                    new_items = 0
+                    for item in page_items:
+                        uri = item.get("_about")
+                        if uri and uri not in existing_uris:
+                            all_items.append(item)
+                            existing_uris.add(uri)
+                            new_items += 1
+
+                    # Stop if no new items found
+                    if new_items == 0:
+                        break
+
+                    current_page += 1
+
+                all_items = all_items[:max_results]
+            else:
+                all_items = await _search_by_keywords_combined(keywords_to_search, pagination)
 
             # If spatial filter provided, filter results locally
             if spatial_type and spatial_value:
                 all_items = _filter_by_spatial(all_items, spatial_value)
 
-            data = {"result": {"items": all_items, "page": 0, "itemsPerPage": len(all_items)}}
+            data = {"result": {"items": all_items, "page": 0, "itemsPerPage": len(all_items), "fetch_all": fetch_all}}
             local_filters = {"publisher": publisher, "theme": theme, "themes": themes, "format": format}
 
         else:

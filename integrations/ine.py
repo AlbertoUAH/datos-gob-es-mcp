@@ -7,7 +7,9 @@ Base URL: https://servicios.ine.es/wstempus/js/
 import json
 from typing import Any
 
-from core import HTTPClient
+from core import HTTPClient, get_logger
+
+logger = get_logger("ine")
 
 
 class INEClientError(Exception):
@@ -129,8 +131,9 @@ class INEClient:
 ine_client = INEClient()
 
 
-def _handle_error(e: Exception) -> str:
-    """Format error message."""
+def _handle_error(e: Exception, context: str = "ine_operation") -> str:
+    """Format and log error message."""
+    logger.warning("ine_error", context=context, error=str(e))
     if isinstance(e, INEClientError):
         return json.dumps({"error": e.message, "status_code": e.status_code}, ensure_ascii=False)
     return json.dumps({"error": str(e)}, ensure_ascii=False)
@@ -247,28 +250,43 @@ def register_ine_tools(mcp):
             return _handle_error(e)
 
     @mcp.tool()
-    async def ine_list_operations() -> str:
-        """List all available INE statistical operations.
+    async def ine_list_operations(page: int = 0, page_size: int = 50) -> str:
+        """List available INE statistical operations with pagination.
 
-        Get the complete list of statistical operations available from INE.
+        Get the list of statistical operations available from INE.
         Use operation IDs to explore tables and data.
 
+        Args:
+            page: Page number starting from 0 (default 0).
+            page_size: Number of operations per page (default 50, max 100).
+
         Returns:
-            JSON with all available operations.
+            JSON with paginated operations.
         """
         try:
-            operations = await ine_client.list_operations()
+            # Fetch all operations (INE API doesn't support pagination natively)
+            all_operations = await ine_client.list_operations()
+
+            # Apply pagination
+            page_size = min(max(1, page_size), 100)  # Limit to 1-100
+            start = page * page_size
+            end = start + page_size
+            paginated = all_operations[start:end]
+
             output = {
-                "total_operations": len(operations),
+                "total_operations": len(all_operations),
+                "page": page,
+                "page_size": page_size,
+                "total_pages": (len(all_operations) + page_size - 1) // page_size,
                 "operations": [
                     {
                         "id": op.get("Id"),
                         "code": op.get("Cod_IOE"),
                         "name": op.get("Nombre"),
                     }
-                    for op in operations
+                    for op in paginated
                 ],
             }
             return json.dumps(output, ensure_ascii=False, indent=2)
         except Exception as e:
-            return _handle_error(e)
+            return _handle_error(e, context="ine_list_operations")

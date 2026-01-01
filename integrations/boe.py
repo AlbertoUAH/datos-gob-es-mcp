@@ -42,20 +42,20 @@ class BOEClient:
         response_format: str = "json"
     ) -> Any:
         """Make an async HTTP request to the BOE API with logging and rate limiting."""
-        # BOE API uses format in URL path
-        url = endpoint
-        if not url.endswith("/"):
-            url += "/"
-        url += f"?formato={response_format}"
+        # BOE API requires Accept header for format (not query param)
+        headers = {
+            "Accept": "application/json" if response_format == "json" else "application/xml"
+        }
 
         try:
-            response = await self.http.get(url, params=params)
+            response = await self.http.get(endpoint, params=params, headers=headers)
 
             if response_format == "json":
                 return response.json()
             return response.text
 
         except Exception as e:
+            logger.warning("boe_request_error", endpoint=endpoint, error=str(e))
             if hasattr(e, 'status_code'):
                 raise BOEClientError(str(e), status_code=e.status_code) from e
             raise BOEClientError(str(e)) from e

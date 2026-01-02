@@ -2777,7 +2777,7 @@ async def _search_datasets_impl(
         sort: Sort field. Use '-' prefix for descending. Examples: '-modified' (newest first), 'title', '-issued'.
         lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'. Use None for all.
         fetch_all: If True, fetches all pages automatically up to max_results.
-        max_results: Maximum results when fetch_all=True (default 500, max 10000).
+        max_results: Maximum results when fetch_all=True (default 100, max 100).
         include_preview: Include data preview (first rows) for CSV/JSON/TSV datasets. Default True.
         preview_rows: Number of preview rows (default 10, max 50). Only used if include_preview=True.
         semantic_query: Natural language query for AI-powered semantic search (e.g., "unemployment data in coastal cities"). First use may take 30-60s to build index.
@@ -2802,7 +2802,7 @@ async def _search_datasets_impl(
         date_start = _validate_date(date_start, "date_start")
         date_end = _validate_date(date_end, "date_end")
 
-        max_results = min(max_results, 10000)  # Safety limit
+        max_results = min(max_results, 100)  # Safety limit
         semantic_top_k = min(semantic_top_k, 100)  # Safety limit
         pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
         data: dict[str, Any] | None = None
@@ -3195,7 +3195,7 @@ async def search_datasets(
         sort: Sort field. Use '-' prefix for descending. Examples: '-modified', 'title'.
         lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'.
         fetch_all: If True, fetches all pages automatically up to max_results.
-        max_results: Maximum results when fetch_all=True (default 100, max 10000).
+        max_results: Maximum results when fetch_all=True (default 100, max 100).
         include_preview: Include data preview for CSV/JSON/TSV datasets. Default True.
         preview_rows: Number of preview rows (default 10, max 50).
         semantic_query: Natural language query for AI-powered semantic search.

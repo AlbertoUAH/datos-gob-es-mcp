@@ -2742,7 +2742,7 @@ async def _search_datasets_impl(
     lang: str | None = "es",
     fetch_all: bool = False,
     max_results: int = 100,
-    include_preview: bool = True,
+    include_preview: bool = False,
     preview_rows: int = 10,
     semantic_query: str | None = None,
     semantic_top_k: int = 50,
@@ -2778,7 +2778,7 @@ async def _search_datasets_impl(
         lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'. Use None for all.
         fetch_all: If True, fetches all pages automatically up to max_results.
         max_results: Maximum results when fetch_all=True (default 100, max 100).
-        include_preview: Include data preview (first rows) for CSV/JSON/TSV datasets. Default True.
+        include_preview: Include data preview (first rows) for CSV/JSON/TSV datasets. Default False for faster responses.
         preview_rows: Number of preview rows (default 10, max 50). Only used if include_preview=True.
         semantic_query: Natural language query for AI-powered semantic search (e.g., "unemployment data in coastal cities"). First use may take 30-60s to build index.
         semantic_top_k: Max results for semantic search (default 50, max 100).
@@ -3160,7 +3160,7 @@ async def search_datasets(
     lang: str | None = "es",
     fetch_all: bool = False,
     max_results: int = 100,
-    include_preview: bool = True,
+    include_preview: bool = False,
     preview_rows: int = 10,
     semantic_query: str | None = None,
     semantic_top_k: int = 50,
@@ -3196,7 +3196,7 @@ async def search_datasets(
         lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'.
         fetch_all: If True, fetches all pages automatically up to max_results.
         max_results: Maximum results when fetch_all=True (default 100, max 100).
-        include_preview: Include data preview for CSV/JSON/TSV datasets. Default True.
+        include_preview: Include data preview for CSV/JSON/TSV datasets. Default False for faster responses.
         preview_rows: Number of preview rows (default 10, max 50).
         semantic_query: Natural language query for AI-powered semantic search.
         semantic_top_k: Max results for semantic search (default 50, max 100).

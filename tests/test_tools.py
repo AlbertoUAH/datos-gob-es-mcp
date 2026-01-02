@@ -5,7 +5,6 @@ import pytest
 from server import (
     get_dataset,
     search_datasets,
-    get_distributions,
     list_metadata,
 )
 
@@ -103,38 +102,6 @@ class TestDatasetTools:
         data = json.loads(result)
 
         assert "datasets" in data
-
-
-class TestDistributionTools:
-    """Tests for distribution-related MCP tools."""
-
-    @pytest.mark.asyncio
-    async def test_get_distributions_all(self, mock_api):
-        """Test get_distributions with no filter (lists all)."""
-        fn = get_tool_fn(get_distributions)
-        result = await fn()
-        data = json.loads(result)
-
-        assert "distributions" in data
-        assert "total_in_page" in data
-
-    @pytest.mark.asyncio
-    async def test_get_distributions_by_dataset(self, mock_api):
-        """Test get_distributions with dataset_id filter."""
-        fn = get_tool_fn(get_distributions)
-        result = await fn(dataset_id="test-dataset-123")
-        data = json.loads(result)
-
-        assert "distributions" in data
-
-    @pytest.mark.asyncio
-    async def test_get_distributions_by_format(self, mock_api):
-        """Test get_distributions with format filter."""
-        fn = get_tool_fn(get_distributions)
-        result = await fn(format="csv")
-        data = json.loads(result)
-
-        assert "distributions" in data
 
 
 class TestMetadataTools:

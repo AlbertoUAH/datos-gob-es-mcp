@@ -44,7 +44,6 @@ docker-compose down
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AEMET_API_KEY` | For weather | AEMET OpenData API key ([get free key](https://opendata.aemet.es/centrodedescargas/altaUsuario)) |
-| `WEBHOOK_SECRET` | No | Secret for webhook signature validation |
 
 ## Deployment Options
 
@@ -206,17 +205,12 @@ docker-compose logs -f mcp-server
    - Verify your API key is correct
    - Keys expire; get a new one if needed
 
-2. **Webhook not receiving notifications**
-   - Check that your endpoint is publicly accessible
-   - Verify firewall rules allow incoming POST requests
-   - Check webhook_list to see if it's registered
-
-3. **Slow first semantic search**
+2. **Slow first semantic search**
    - First search builds the embedding index (~30-60 seconds)
    - Subsequent searches are fast (<1 second)
    - Index is cached to disk
 
-4. **Docker container exits immediately**
+3. **Docker container exits immediately**
    - Use `-it` flags for interactive mode
    - Check logs: `docker logs <container_id>`
 

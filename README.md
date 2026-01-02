@@ -21,10 +21,9 @@ Este servidor MCP actua como un **hub centralizado** que conecta multiples APIs 
 
 ### Caracteristicas
 
-- **26 herramientas MCP** para consultar multiples APIs de datos publicos
+- **18 herramientas MCP** para consultar multiples APIs de datos publicos
 - **5 recursos MCP** (templates dinamicos) para acceso directo a datos
 - **6 prompts MCP** para guias de busqueda detalladas
-- **Sistema de notificaciones**: Webhooks para detectar cambios en datasets
 - **Busqueda semantica**: Busqueda por significado usando embeddings (IA)
 - **Busqueda espacial inteligente**: Filtra por ubicacion usando metadatos, titulos y URIs
 - **Cache de metadatos**: Cache local de 24h para respuestas instantaneas
@@ -77,7 +76,6 @@ cp .env.example .env
 | Variable | Requerida | Descripcion |
 |----------|-----------|-------------|
 | `AEMET_API_KEY` | Para meteorologia | API key de AEMET OpenData ([obtener gratis](https://opendata.aemet.es/centrodedescargas/altaUsuario)) |
-| `WEBHOOK_SECRET` | No | Secreto para validar firmas de webhooks |
 | `LOG_LEVEL` | No | Nivel de logging: DEBUG, INFO, WARNING, ERROR (default: INFO) |
 | `LOG_FORMAT` | No | Formato de logs: console o json (default: console) |
 | `RATE_LIMIT_DATOS_GOB_ES` | No | Peticiones/segundo a datos.gob.es (default: 10) |
@@ -117,15 +115,13 @@ flowchart TB
 
     ChatGPT <-->|"Protocolo MCP"| Server
 
-    subgraph Tools["TOOLS (26)"]
-        subgraph ToolsDatosGob["datos.gob.es (7)"]
+    subgraph Tools["TOOLS (18)"]
+        subgraph ToolsDatosGob["datos.gob.es (5)"]
             search_datasets
             get_dataset
-            get_distributions
             download_data
             get_related_datasets
             list_metadata
-            refresh_metadata_cache
         end
 
         subgraph ToolsINE["INE (3)"]
@@ -147,19 +143,10 @@ flowchart TB
             boe_search
         end
 
-        subgraph ToolsWebhooks["Webhooks (6)"]
-            webhook_register
-            webhook_list
-            webhook_delete
-            webhook_test
-            check_dataset_changes
-            list_watched_datasets
-        end
-
         subgraph ToolsUtils["Utilidades (3)"]
             export_results
             get_usage_stats
-            clear_usage_stats
+            refresh_metadata_cache
         end
     end
 
@@ -184,7 +171,7 @@ flowchart TB
     Server --> Resources
     Server --> Prompts
 
-    subgraph APIs["APIs REST Externas"]
+    subgraph APIs["APIs Externas"]
         API1["datos.gob.es"]
         API2["INE"]
         API3["AEMET"]
@@ -192,7 +179,6 @@ flowchart TB
     end
 
     ToolsDatosGob --> API1
-    ToolsWebhooks --> API1
     Resources --> API1
     ToolsINE --> API2
     ToolsAEMET --> API3
@@ -203,7 +189,7 @@ flowchart TB
 
 | Capacidad | Cantidad | Descripcion |
 |-----------|----------|-------------|
-| **Tools** | 26 | Funciones que el LLM puede invocar |
+| **Tools** | 18 | Funciones que el LLM puede invocar |
 | **Resources** | 5 | Templates dinamicos para acceso directo |
 | **Prompts** | 6 | Guias de busqueda predefinidas |
 
@@ -211,17 +197,15 @@ flowchart TB
 
 ## Tools (Herramientas)
 
-### datos.gob.es (7 herramientas)
+### datos.gob.es (5 herramientas)
 
 | Herramienta | Descripcion |
 |-------------|-------------|
 | `search_datasets` | Busqueda unificada de datasets: por filtros (titulo, tema, publicador, formato, fecha), semantica (IA con embeddings) o hibrida. Soporta multi-tema con logica OR y paginacion paralela |
 | `get_dataset` | Obtiene metadatos completos de un dataset por su ID: titulo, descripcion, publicador, frecuencia de actualizacion, formatos disponibles y distribuciones |
-| `get_distributions` | Lista los archivos descargables de un dataset con sus formatos (CSV, JSON, XML, etc.) y URLs de acceso |
 | `download_data` | Descarga y parsea datos de un dataset (hasta 50MB). Soporta CSV y JSON, devuelve preview de filas |
 | `get_related_datasets` | Encuentra datasets similares usando busqueda semantica con embeddings de IA |
 | `list_metadata` | Lista metadatos del catalogo: publicadores (`publishers`), tematicas (`themes`), sectores publicos (`public_sectors`), provincias (`provinces`) o comunidades autonomas (`autonomous_regions`). Cache de 24h |
-| `refresh_metadata_cache` | Fuerza la actualizacion del cache de metadatos (publishers, themes, provincias, etc.) |
 
 ### INE - Instituto Nacional de Estadistica (3 herramientas) - FUENTE PRINCIPAL DE ESTADISTICAS
 
@@ -250,24 +234,13 @@ El INE es la **fuente oficial principal** de estadisticas en Espana. Contiene da
 | `boe_get_document` | Obtiene metadatos completos de un documento del BOE por su ID (ej: `BOE-A-2024-12345`) |
 | `boe_search` | Busca documentos en el BOE por texto en un rango de fechas (hasta 90 dias) |
 
-### Webhooks - Notificaciones (6 herramientas)
-
-| Herramienta | Descripcion |
-|-------------|-------------|
-| `webhook_register` | Registra un webhook para recibir notificaciones cuando un dataset cambie |
-| `webhook_list` | Lista todos los webhooks registrados |
-| `webhook_delete` | Elimina un webhook por su ID |
-| `webhook_test` | Envia una notificacion de prueba a un webhook |
-| `check_dataset_changes` | Verifica si un dataset ha cambiado desde la ultima comprobacion |
-| `list_watched_datasets` | Lista los datasets que estan siendo vigilados por cambios |
-
 ### Utilidades (3 herramientas)
 
 | Herramienta | Descripcion |
 |-------------|-------------|
 | `export_results` | Exporta resultados de busqueda a formato CSV o JSON |
 | `get_usage_stats` | Muestra estadisticas de uso: tools mas usadas, datasets mas accedidos |
-| `clear_usage_stats` | Limpia las estadisticas de uso acumuladas |
+| `refresh_metadata_cache` | Fuerza la actualizacion del cache de metadatos |
 
 ---
 
@@ -348,13 +321,6 @@ Asistente: [Usa download_data(dataset_id="l01280066-presupuestos", max_mb=20)]
 ```
 Usuario: Encuentra datasets similares a este de poblacion
 Asistente: [Usa get_related_datasets(dataset_id="...", top_k=10)]
-```
-
-### Obtener distribuciones de un dataset
-
-```
-Usuario: Que formatos tiene disponible este dataset?
-Asistente: [Usa get_distributions(dataset_id="l01280066-presupuestos")]
 ```
 
 ### Exportar resultados de busqueda (nuevo)
@@ -445,16 +411,12 @@ datos-gob-es-mcp/
 │   ├── ine.py               # Instituto Nacional de Estadistica
 │   ├── aemet.py             # Agencia de Meteorologia
 │   └── boe.py               # Boletin Oficial del Estado
-├── notifications/            # Sistema de webhooks
-│   ├── webhook.py           # Gestor de webhooks
-│   └── watcher.py           # Vigilante de cambios
 ├── prompts/                  # Guias de busqueda MCP
 ├── examples/                 # Jupyter notebooks de ejemplo
 │   ├── 01_introduccion.ipynb
 │   ├── 02_busqueda_datasets.ipynb
 │   ├── 03_analisis_datos.ipynb
-│   ├── 04_integraciones.ipynb
-│   └── 05_webhooks.ipynb
+│   └── 04_integraciones.ipynb
 ├── tests/                    # Tests automatizados
 ├── docs/                     # Documentacion adicional
 │   └── DEPLOYMENT.md        # Guia de despliegue

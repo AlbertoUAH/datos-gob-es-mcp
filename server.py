@@ -3292,51 +3292,6 @@ async def get_related_datasets(
         return json.dumps({"error": f"Failed to find similar datasets: {e}"}, ensure_ascii=False)
 
 
-# =============================================================================
-# DISTRIBUTION TOOLS
-# =============================================================================
-
-
-@mcp.tool()
-async def get_distributions(
-    dataset_id: str | None = None,
-    format: str | None = None,
-    include_preview: bool = False,
-    preview_rows: int = 10,
-    page: int = 0,
-) -> str:
-    """Get downloadable files (distributions) from the open data catalog.
-
-    Can filter by dataset or format. If no filters provided, lists all distributions.
-
-    Args:
-        dataset_id: Get distributions for a specific dataset.
-        format: Filter by format (e.g., 'csv', 'json', 'xml').
-        include_preview: Include data preview for CSV/JSON files (only with dataset_id).
-        preview_rows: Number of preview rows (default 10, max 50).
-        page: Page number (starting from 0).
-
-    Returns:
-        JSON with distributions including download URLs and formats.
-    """
-    try:
-        pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-
-        if dataset_id:
-            data = await client.get_distributions_by_dataset(dataset_id, pagination)
-            if include_preview:
-                preview_rows = min(max(1, preview_rows), 50)
-                return await _format_response_with_preview(data, preview_rows)
-        elif format:
-            data = await client.get_distributions_by_format(format, pagination)
-        else:
-            data = await client.list_distributions(pagination)
-
-        return _format_response(data, "distribution")
-    except Exception as e:
-        return _handle_error(e)
-
-
 @mcp.tool()
 async def download_data(
     dataset_id: str,
@@ -3693,25 +3648,6 @@ async def get_usage_stats(include_searches: bool = True) -> str:
     return json.dumps(stats, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
-async def clear_usage_stats() -> str:
-    """Clear all usage statistics.
-
-    Resets the usage metrics to start fresh. Use this to clear history
-    or start a new analysis session.
-
-    Returns:
-        Confirmation message.
-    """
-    usage_metrics.record_tool_call("clear_usage_stats")
-    usage_metrics.clear()
-
-    return json.dumps({
-        "status": "success",
-        "message": "Usage statistics cleared.",
-    }, ensure_ascii=False, indent=2)
-
-
 # =============================================================================
 # RESOURCE TEMPLATES - Dynamic Resources
 # =============================================================================
@@ -3919,19 +3855,6 @@ try:
     register_boe_tools(mcp)
 except ImportError:
     # BOE integration not available
-    pass
-
-
-# =============================================================================
-# NOTIFICATIONS - Webhooks and Dataset Watching
-# =============================================================================
-
-# Import and register webhook/notification tools
-try:
-    from notifications.webhook import register_webhook_tools
-    register_webhook_tools(mcp)
-except ImportError:
-    # Notifications not available
     pass
 
 

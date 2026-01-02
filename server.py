@@ -472,11 +472,16 @@ class EmbeddingIndex:
 
     Provides lazy-loaded semantic search capabilities using sentence-transformers.
     The embedding index is cached to disk for faster subsequent loads.
+
+    Uses intfloat/multilingual-e5-small which requires:
+    - "query: " prefix for search queries
+    - "passage: " prefix for documents/passages
     """
 
-    MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    MODEL_NAME = "intfloat/multilingual-e5-small"
+    MODEL_VERSION = "1"  # Increment to invalidate cache on model change
     CACHE_DIR = Path.home() / ".cache" / "datos-gob-es"
-    CACHE_FILE = CACHE_DIR / "embeddings.pkl"
+    CACHE_FILE = CACHE_DIR / "embeddings_e5.pkl"  # New cache file for E5 model
 
     def __init__(self):
         self.model = None
@@ -514,6 +519,12 @@ class EmbeddingIndex:
             with open(self.CACHE_FILE, "rb") as f:
                 cache_data = pickle.load(f)
 
+            # Check model version - invalidate if different
+            cached_version = cache_data.get("model_version", "0")
+            if cached_version != self.MODEL_VERSION:
+                logger.info("embedding_cache_version_mismatch", cached=cached_version, current=self.MODEL_VERSION)
+                return False
+
             self.embeddings = cache_data["embeddings"]
             self.dataset_ids = cache_data["dataset_ids"]
             self.dataset_titles = cache_data["dataset_titles"]
@@ -528,6 +539,8 @@ class EmbeddingIndex:
         """Save embeddings to cache file."""
         self._ensure_cache_dir()
         cache_data = {
+            "model_version": self.MODEL_VERSION,
+            "model_name": self.MODEL_NAME,
             "embeddings": self.embeddings,
             "dataset_ids": self.dataset_ids,
             "dataset_titles": self.dataset_titles,
@@ -589,22 +602,23 @@ class EmbeddingIndex:
 
             # Combine title and description for embedding
             combined_text = f"{title_str}. {desc_str}" if desc_str else title_str
-            texts_to_encode.append(combined_text)
+            # E5 models require "passage: " prefix for documents
+            texts_to_encode.append(f"passage: {combined_text}")
 
         # Generate embeddings
-        self.embeddings = self.model.encode(texts_to_encode, show_progress_bar=False)
+        self.embeddings = self.model.encode(texts_to_encode, show_progress_bar=False, normalize_embeddings=True)
         self._initialized = True
 
         # Save to cache
         self._save_cache()
 
-    def search(self, query: str, top_k: int = 20, min_score: float = 0.3) -> list[dict[str, Any]]:
+    def search(self, query: str, top_k: int = 20, min_score: float = 0.5) -> list[dict[str, Any]]:
         """Search for similar datasets using cosine similarity.
 
         Args:
             query: The search query.
             top_k: Maximum number of results to return.
-            min_score: Minimum similarity score (0-1).
+            min_score: Minimum similarity score (0-1). Default 0.5 filters low-relevance results.
 
         Returns:
             List of dicts with dataset_id, title, description, and score.
@@ -614,16 +628,11 @@ class EmbeddingIndex:
 
         self._load_model()
 
-        # Encode query
-        query_embedding = self.model.encode(query)
+        # Encode query with E5 prefix
+        query_embedding = self.model.encode(f"query: {query}", normalize_embeddings=True)
 
-        # Calculate cosine similarity
-        # Normalize embeddings
-        query_norm = query_embedding / np.linalg.norm(query_embedding)
-        embeddings_norm = self.embeddings / np.linalg.norm(self.embeddings, axis=1, keepdims=True)
-
-        # Cosine similarity
-        similarities = np.dot(embeddings_norm, query_norm)
+        # Calculate cosine similarity (embeddings already normalized)
+        similarities = np.dot(self.embeddings, query_embedding)
 
         # Get top-k indices
         top_indices = np.argsort(similarities)[::-1][:top_k]
@@ -655,16 +664,12 @@ class EmbeddingIndex:
         """
         self._load_model()
 
-        # Encode both
-        query_embedding = self.model.encode(query)
-        text_embedding = self.model.encode(text)
+        # Encode both with E5 prefixes (normalized)
+        query_embedding = self.model.encode(f"query: {query}", normalize_embeddings=True)
+        text_embedding = self.model.encode(f"passage: {text}", normalize_embeddings=True)
 
-        # Normalize
-        query_norm = query_embedding / np.linalg.norm(query_embedding)
-        text_norm = text_embedding / np.linalg.norm(text_embedding)
-
-        # Cosine similarity
-        similarity = float(np.dot(query_norm, text_norm))
+        # Cosine similarity (already normalized)
+        similarity = float(np.dot(query_embedding, text_embedding))
         return max(0.0, similarity)  # Ensure non-negative
 
     def clear_cache(self):
@@ -2741,7 +2746,7 @@ async def _search_datasets_impl(
     preview_rows: int = 10,
     semantic_query: str | None = None,
     semantic_top_k: int = 50,
-    semantic_min_score: float = 0.3,
+    semantic_min_score: float = 0.5,
     license: str | None = None,
     frequency: str | None = None,
 ) -> str:
@@ -2777,7 +2782,7 @@ async def _search_datasets_impl(
         preview_rows: Number of preview rows (default 10, max 50). Only used if include_preview=True.
         semantic_query: Natural language query for AI-powered semantic search (e.g., "unemployment data in coastal cities"). First use may take 30-60s to build index.
         semantic_top_k: Max results for semantic search (default 50, max 100).
-        semantic_min_score: Min similarity score 0-1 for semantic search (default 0.3).
+        semantic_min_score: Min similarity score 0-1 for semantic search (default 0.5). Lower = more results but less relevant.
         license: Filter by license type (e.g., 'CC_BY', 'CC0', 'public-domain'). Partial match supported.
         frequency: Filter by update frequency. Values: 'P1D' (daily), 'P1W' (weekly), 'P1M' (monthly), 'P1Y' (yearly).
 
@@ -3159,7 +3164,7 @@ async def search_datasets(
     preview_rows: int = 10,
     semantic_query: str | None = None,
     semantic_top_k: int = 50,
-    semantic_min_score: float = 0.3,
+    semantic_min_score: float = 0.5,
     license: str | None = None,
     frequency: str | None = None,
 ) -> str:
@@ -3195,7 +3200,7 @@ async def search_datasets(
         preview_rows: Number of preview rows (default 10, max 50).
         semantic_query: Natural language query for AI-powered semantic search.
         semantic_top_k: Max results for semantic search (default 50, max 100).
-        semantic_min_score: Min similarity score 0-1 for semantic search (default 0.3).
+        semantic_min_score: Min similarity score 0-1 for semantic search (default 0.5). Lower = more results but less relevant.
         license: Filter by license type (e.g., 'CC_BY', 'CC0', 'public-domain').
         frequency: Filter by update frequency ('P1D', 'P1W', 'P1M', 'P1Y').
 

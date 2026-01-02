@@ -2720,8 +2720,7 @@ async def get_dataset(dataset_id: str, lang: str | None = "es") -> str:
         return _handle_error(e)
 
 
-@mcp.tool()
-async def search_datasets(
+async def _search_datasets_impl(
     title: str | None = None,
     publisher: str | None = None,
     theme: str | None = None,
@@ -2746,7 +2745,7 @@ async def search_datasets(
     license: str | None = None,
     frequency: str | None = None,
 ) -> str:
-    """Search and filter datasets from the Spanish open data catalog.
+    """Internal implementation of search_datasets.
 
     Supports three search modes:
     1. Filter-based: Use title, keyword, theme, publisher, etc.
@@ -2827,8 +2826,8 @@ async def search_datasets(
             if has_filters:
                 # HYBRID MODE: Filter first, then rank by semantic similarity
                 # First, perform traditional search to get filtered results
-                # We'll recursively call without semantic_query to get filtered items
-                filtered_response = await search_datasets(
+                # Use _search_datasets_impl to avoid FunctionTool recursion issues
+                filtered_response = await _search_datasets_impl(
                     title=title,
                     publisher=publisher,
                     theme=theme,
@@ -3136,6 +3135,98 @@ async def search_datasets(
 
     except Exception as e:
         return _handle_error(e)
+
+
+@mcp.tool()
+async def search_datasets(
+    title: str | None = None,
+    publisher: str | None = None,
+    theme: str | None = None,
+    themes: list[str] | None = None,
+    format: str | None = None,
+    keyword: str | None = None,
+    spatial_type: str | None = None,
+    spatial_value: str | None = None,
+    date_start: str | None = None,
+    date_end: str | None = None,
+    exact_match: bool = False,
+    page: int = 0,
+    sort: str | None = None,
+    lang: str | None = "es",
+    fetch_all: bool = False,
+    max_results: int = 100,
+    include_preview: bool = True,
+    preview_rows: int = 10,
+    semantic_query: str | None = None,
+    semantic_top_k: int = 50,
+    semantic_min_score: float = 0.3,
+    license: str | None = None,
+    frequency: str | None = None,
+) -> str:
+    """Search and filter datasets from the Spanish open data catalog.
+
+    Supports three search modes:
+    1. Filter-based: Use title, keyword, theme, publisher, etc.
+    2. Semantic: Use semantic_query for AI-powered natural language search.
+    3. Hybrid: Combine semantic_query with filters for best results.
+
+    Response includes enriched metadata: id, publisher_name, frequency, language,
+    spatial, license, formats, and access_url. By default, includes a data preview
+    (first 10 rows) for datasets with CSV/JSON/TSV formats.
+
+    Args:
+        title: Search text in dataset titles.
+        publisher: Publisher ID (e.g., 'EA0010587' for INE). Use list_metadata('publishers') to find IDs.
+        theme: Theme ID (e.g., 'economia', 'salud', 'educacion'). Use list_metadata('themes') to find IDs.
+        themes: List of theme IDs for multi-theme search (OR logic). Example: ['economia', 'hacienda'].
+        format: Format ID (e.g., 'csv', 'json', 'xml').
+        keyword: Keyword/tag to filter by (e.g., 'presupuesto', 'poblacion').
+        spatial_type: Geographic type ('Autonomia', 'Provincia').
+        spatial_value: Geographic value ('Madrid', 'Cataluna', 'Pais-Vasco').
+        date_start: Start date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-01-01T00:00Z').
+        date_end: End date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-12-31T23:59Z').
+        exact_match: If True with title, match whole words only.
+        page: Page number (starting from 0). Ignored if fetch_all=True.
+        sort: Sort field. Use '-' prefix for descending. Examples: '-modified', 'title'.
+        lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'.
+        fetch_all: If True, fetches all pages automatically up to max_results.
+        max_results: Maximum results when fetch_all=True (default 100, max 10000).
+        include_preview: Include data preview for CSV/JSON/TSV datasets. Default True.
+        preview_rows: Number of preview rows (default 10, max 50).
+        semantic_query: Natural language query for AI-powered semantic search.
+        semantic_top_k: Max results for semantic search (default 50, max 100).
+        semantic_min_score: Min similarity score 0-1 for semantic search (default 0.3).
+        license: Filter by license type (e.g., 'CC_BY', 'CC0', 'public-domain').
+        frequency: Filter by update frequency ('P1D', 'P1W', 'P1M', 'P1Y').
+
+    Returns:
+        JSON with matching datasets including metadata and data preview.
+    """
+    return await _search_datasets_impl(
+        title=title,
+        publisher=publisher,
+        theme=theme,
+        themes=themes,
+        format=format,
+        keyword=keyword,
+        spatial_type=spatial_type,
+        spatial_value=spatial_value,
+        date_start=date_start,
+        date_end=date_end,
+        exact_match=exact_match,
+        page=page,
+        sort=sort,
+        lang=lang,
+        fetch_all=fetch_all,
+        max_results=max_results,
+        include_preview=include_preview,
+        preview_rows=preview_rows,
+        semantic_query=semantic_query,
+        semantic_top_k=semantic_top_k,
+        semantic_min_score=semantic_min_score,
+        license=license,
+        frequency=frequency,
+    )
 
 
 @mcp.tool()

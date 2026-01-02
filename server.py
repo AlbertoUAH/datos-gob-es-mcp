@@ -574,7 +574,7 @@ class EmbeddingIndex:
 
             all_items.extend(items)
 
-            if len(items) < 200:
+            if len(items) < DEFAULT_PAGE_SIZE:
                 break
 
             page += 1
@@ -1591,261 +1591,6 @@ DEFAULT_PAGE_SIZE = 50
 PREVIEW_MAX_BYTES = 100 * 1024  # 100KB
 PREVIEW_TIMEOUT = 10.0  # 10 seconds
 
-# Mapping of regional names to API-compatible names (Basque/Catalan -> Spanish)
-PROVINCE_NAME_MAP = {
-    # Basque Country
-    "bizkaia": "Vizcaya",
-    "gipuzkoa": "Guipuzcoa",
-    "araba": "Alava",
-    "álava": "Alava",
-    # Catalonia
-    "barcelona": "Barcelona",
-    "girona": "Gerona",
-    "lleida": "Lerida",
-    "tarragona": "Tarragona",
-    # Galicia
-    "a coruña": "Coruna",
-    "a coruna": "Coruna",
-    "ourense": "Orense",
-    # Valencia
-    "alacant": "Alicante",
-    "castelló": "Castellon",
-    "castello": "Castellon",
-    "valencia": "Valencia",
-    # Balearic Islands
-    "illes balears": "Baleares",
-    "balears": "Baleares",
-    # Navarra
-    "nafarroa": "Navarra",
-}
-
-AUTONOMY_NAME_MAP = {
-    # Basque Country
-    "euskadi": "Pais-Vasco",
-    "país vasco": "Pais-Vasco",
-    "pais vasco": "Pais-Vasco",
-    # Catalonia
-    "catalunya": "Cataluna",
-    "cataluña": "Cataluna",
-    # Galicia
-    "galiza": "Galicia",
-    # Valencia
-    "comunitat valenciana": "Comunidad-Valenciana",
-    "comunidad valenciana": "Comunidad-Valenciana",
-    "país valenciano": "Comunidad-Valenciana",
-    # Balearic Islands
-    "illes balears": "Baleares",
-    # Navarra
-    "nafarroa": "Navarra",
-    "comunidad foral de navarra": "Comunidad-Foral-Navarra",
-}
-
-# Map provinces to their autonomous communities
-PROVINCE_TO_AUTONOMY = {
-    "vizcaya": "Pais-Vasco",
-    "guipuzcoa": "Pais-Vasco",
-    "alava": "Pais-Vasco",
-    "barcelona": "Cataluna",
-    "gerona": "Cataluna",
-    "lerida": "Cataluna",
-    "tarragona": "Cataluna",
-    "coruna": "Galicia",
-    "lugo": "Galicia",
-    "orense": "Galicia",
-    "pontevedra": "Galicia",
-    "alicante": "Comunidad-Valenciana",
-    "castellon": "Comunidad-Valenciana",
-    "valencia": "Comunidad-Valenciana",
-    "baleares": "Baleares",
-    "navarra": "Comunidad-Foral-Navarra",
-    "madrid": "Comunidad-Madrid",
-}
-
-# Common keyword translations for bilingual regions
-# Spanish -> [Basque, Catalan, Galician] equivalents
-KEYWORD_TRANSLATIONS = {
-    # Traffic/Transport
-    "trafico": ["trafikoa", "trànsit", "tráfico"],
-    "transporte": ["garraioa", "transport", "transporte"],
-    "carretera": ["errepidea", "carretera", "estrada"],
-    # Environment
-    "medioambiente": ["ingurumena", "medi ambient", "medio ambiente"],
-    "agua": ["ura", "aigua", "auga"],
-    # Health
-    "salud": ["osasuna", "salut", "saúde"],
-    "hospital": ["ospitalea", "hospital", "hospital"],
-    # Education
-    "educacion": ["hezkuntza", "educació", "educación"],
-    # Economy
-    "empleo": ["enplegua", "ocupació", "emprego"],
-    "presupuesto": ["aurrekontua", "pressupost", "orzamento"],
-}
-
-# Regions that use Basque
-BASQUE_REGIONS = {"pais-vasco", "vizcaya", "guipuzcoa", "alava", "bizkaia", "gipuzkoa", "araba", "navarra"}
-# Regions that use Catalan
-CATALAN_REGIONS = {"cataluna", "barcelona", "gerona", "lerida", "tarragona", "baleares", "comunidad-valenciana"}
-# Regions that use Galician
-GALICIAN_REGIONS = {"galicia", "coruna", "lugo", "orense", "pontevedra"}
-
-
-def _get_keyword_translations(keyword: str, spatial_value: str | None) -> list[str]:
-    """Get keyword translations for bilingual regions.
-
-    Returns a list of keywords to search, including translations for the region.
-    Only adds translations when spatial_value is provided to avoid timeout
-    from too many API calls.
-    """
-    keywords = [keyword]
-    normalized_kw = normalize_text(keyword.lower())
-
-    if normalized_kw not in KEYWORD_TRANSLATIONS:
-        return keywords
-
-    translations = KEYWORD_TRANSLATIONS[normalized_kw]
-
-    if not spatial_value:
-        # No spatial filter - only return original keyword to avoid timeout
-        # Adding all translations causes 8+ API calls which times out
-        return keywords
-    else:
-        spatial_lower = spatial_value.lower()
-        spatial_normalized = normalize_text(spatial_lower)
-
-        # Check which language region
-        if spatial_lower in BASQUE_REGIONS or spatial_normalized in BASQUE_REGIONS:
-            # Add Basque translation (index 0)
-            if translations[0]:
-                keywords.append(translations[0])
-        elif spatial_lower in CATALAN_REGIONS or spatial_normalized in CATALAN_REGIONS:
-            # Add Catalan translation (index 1)
-            if len(translations) > 1 and translations[1]:
-                keywords.append(translations[1])
-        elif spatial_lower in GALICIAN_REGIONS or spatial_normalized in GALICIAN_REGIONS:
-            # Add Galician translation (index 2)
-            if len(translations) > 2 and translations[2]:
-                keywords.append(translations[2])
-
-    return list(set(keywords))  # Remove duplicates
-
-
-def _normalize_spatial_name(name: str, spatial_type: str) -> tuple[list[str], str | None]:
-    """Normalize spatial name and return possible variants to search.
-
-    Returns:
-        Tuple of (variants list, related autonomy or None)
-    """
-    name_lower = name.lower().strip()
-    name_normalized = normalize_text(name_lower)  # Remove accents
-    variants = [name]  # Start with original
-    related_autonomy = None
-
-    if spatial_type.lower() == "provincia":
-        # Check province name map
-        if name_lower in PROVINCE_NAME_MAP:
-            mapped = PROVINCE_NAME_MAP[name_lower]
-            if mapped not in variants:
-                variants.append(mapped)
-            # Get autonomy from the mapped name
-            if mapped.lower() in PROVINCE_TO_AUTONOMY:
-                related_autonomy = PROVINCE_TO_AUTONOMY[mapped.lower()]
-        elif name_normalized in PROVINCE_NAME_MAP:
-            mapped = PROVINCE_NAME_MAP[name_normalized]
-            if mapped not in variants:
-                variants.append(mapped)
-            if mapped.lower() in PROVINCE_TO_AUTONOMY:
-                related_autonomy = PROVINCE_TO_AUTONOMY[mapped.lower()]
-
-        # Check if the name itself maps to an autonomy
-        if not related_autonomy:
-            for prov, autonomy in PROVINCE_TO_AUTONOMY.items():
-                if prov in name_lower or name_lower in prov or prov in name_normalized:
-                    related_autonomy = autonomy
-                    break
-
-    elif spatial_type.lower() in ("autonomia", "autonomía", "comunidad"):
-        if name_lower in AUTONOMY_NAME_MAP:
-            mapped = AUTONOMY_NAME_MAP[name_lower]
-            if mapped not in variants:
-                variants.append(mapped)
-        elif name_normalized in AUTONOMY_NAME_MAP:
-            mapped = AUTONOMY_NAME_MAP[name_normalized]
-            if mapped not in variants:
-                variants.append(mapped)
-
-    return variants, related_autonomy
-
-
-def _filter_by_spatial(items: list[dict[str, Any]], spatial_value: str) -> list[dict[str, Any]]:
-    """Filter items by spatial coverage.
-
-    Checks multiple fields since many datasets don't have the 'spatial' field configured:
-    1. spatial field (primary)
-    2. title (fallback - many datasets include city/region in title)
-    3. URI (fallback - dataset IDs often include location names)
-    """
-    if not spatial_value:
-        return items
-
-    spatial_lower = spatial_value.lower()
-    spatial_normalized = normalize_text(spatial_lower)
-
-    # Build all variants to check (use set to avoid duplicates)
-    spatial_variants = {spatial_lower, spatial_normalized}
-
-    # Add mapped province names and their autonomies
-    if spatial_lower in PROVINCE_NAME_MAP:
-        mapped = PROVINCE_NAME_MAP[spatial_lower].lower()
-        spatial_variants.add(mapped)
-        # Also get the autonomy for the mapped province
-        if mapped in PROVINCE_TO_AUTONOMY:
-            spatial_variants.add(PROVINCE_TO_AUTONOMY[mapped].lower())
-    if spatial_normalized in PROVINCE_NAME_MAP:
-        mapped = PROVINCE_NAME_MAP[spatial_normalized].lower()
-        spatial_variants.add(mapped)
-        if mapped in PROVINCE_TO_AUTONOMY:
-            spatial_variants.add(PROVINCE_TO_AUTONOMY[mapped].lower())
-
-    # Add mapped autonomy names
-    if spatial_lower in AUTONOMY_NAME_MAP:
-        spatial_variants.add(AUTONOMY_NAME_MAP[spatial_lower].lower())
-    if spatial_normalized in AUTONOMY_NAME_MAP:
-        spatial_variants.add(AUTONOMY_NAME_MAP[spatial_normalized].lower())
-
-    # Also add the autonomy if the original name matches a province
-    for prov, autonomy in PROVINCE_TO_AUTONOMY.items():
-        if prov == spatial_lower or prov == spatial_normalized:
-            spatial_variants.add(autonomy.lower())
-
-    filtered = []
-    for item in items:
-        # 1. Check spatial field (primary source)
-        spatial = item.get("spatial", "")
-        if isinstance(spatial, dict):
-            spatial = spatial.get("_about", "")
-        elif isinstance(spatial, list):
-            spatial = " ".join(s.get("_about", "") if isinstance(s, dict) else str(s) for s in spatial)
-
-        # 2. Extract title text
-        title = item.get("title", "")
-        if isinstance(title, list) and title:
-            title = title[0].get("_value", "") if isinstance(title[0], dict) else str(title[0])
-        elif isinstance(title, dict):
-            title = title.get("_value", "")
-
-        # 3. Get URI
-        uri = item.get("_about", "")
-
-        # Combine all text sources for matching
-        combined_text = f"{spatial} {title} {uri}".lower()
-
-        # Check if any variant matches in any of the fields
-        if any(variant in combined_text for variant in spatial_variants):
-            filtered.append(item)
-
-    return filtered
-
-
 async def _search_by_keywords_combined(
     keywords: list[str],
     pagination: PaginationParams,
@@ -2732,8 +2477,6 @@ async def _search_datasets_impl(
     themes: list[str] | None = None,
     format: str | None = None,
     keyword: str | None = None,
-    spatial_type: str | None = None,
-    spatial_value: str | None = None,
     date_start: str | None = None,
     date_end: str | None = None,
     exact_match: bool = False,
@@ -2768,8 +2511,6 @@ async def _search_datasets_impl(
         themes: List of theme IDs for multi-theme search (OR logic). Example: ['economia', 'hacienda'].
         format: Format ID (e.g., 'csv', 'json', 'xml').
         keyword: Keyword/tag to filter by (e.g., 'presupuesto', 'poblacion').
-        spatial_type: Geographic type ('Autonomia', 'Provincia').
-        spatial_value: Geographic value ('Madrid', 'Cataluna', 'Pais-Vasco').
         date_start: Start date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-01-01T00:00Z').
         date_end: End date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-12-31T23:59Z').
         exact_match: If True with title, match whole words only (e.g., 'DANA' won't match 'ciudadana').
@@ -2793,8 +2534,7 @@ async def _search_datasets_impl(
     usage_metrics.record_tool_call("search_datasets")
     usage_metrics.record_search({
         "title": title, "publisher": publisher, "theme": theme, "themes": themes,
-        "format": format, "keyword": keyword, "spatial_type": spatial_type,
-        "spatial_value": spatial_value, "semantic_query": semantic_query,
+        "format": format, "keyword": keyword, "semantic_query": semantic_query,
     })
 
     try:
@@ -2809,7 +2549,7 @@ async def _search_datasets_impl(
         local_filters: dict[str, Any] = {}
 
         # Check if any traditional filters are provided
-        has_filters = any([title, publisher, theme, themes, format, keyword, spatial_type, date_start])
+        has_filters = any([title, publisher, theme, themes, format, keyword, date_start])
 
         # =================================================================
         # SEMANTIC SEARCH MODE (pure or hybrid)
@@ -2838,8 +2578,6 @@ async def _search_datasets_impl(
                     theme=theme,
                     format=format,
                     keyword=keyword,
-                    spatial_type=spatial_type,
-                    spatial_value=spatial_value,
                     date_start=date_start,
                     date_end=date_end,
                     exact_match=exact_match,
@@ -2861,7 +2599,7 @@ async def _search_datasets_impl(
                         "semantic_query": semantic_query,
                         "filters_applied": _build_filters_dict(
                             title=title, publisher=publisher, theme=theme,
-                            format=format, keyword=keyword, spatial=spatial_value
+                            format=format, keyword=keyword
                         ),
                         "total_results": 0,
                         "datasets": [],
@@ -2895,7 +2633,7 @@ async def _search_datasets_impl(
                     "semantic_query": semantic_query,
                     "filters_applied": _build_filters_dict(
                         title=title, publisher=publisher, theme=theme,
-                        format=format, keyword=keyword, spatial=spatial_value
+                        format=format, keyword=keyword
                     ),
                     "total_filtered": len(filtered_datasets),
                     "total_results": len(ranked_results),
@@ -3002,49 +2740,6 @@ async def _search_datasets_impl(
             data = await client.get_datasets_by_date_range(date_start, date_end, pagination)
             local_filters = {"publisher": publisher, "theme": theme, "themes": themes, "format": format, "keyword": keyword}
 
-        elif keyword and spatial_type and spatial_value:
-            # When keyword + spatial provided, use keyword search with translations
-            # then filter by spatial (more effective than spatial search + keyword filter)
-            keywords_to_search = _get_keyword_translations(keyword, spatial_value)
-            all_items = await _search_by_keywords_combined(keywords_to_search, pagination)
-
-            # Filter by spatial
-            filtered_items = _filter_by_spatial(all_items, spatial_value)
-
-            data = {"result": {"items": filtered_items, "page": 0, "itemsPerPage": len(filtered_items)}}
-            local_filters = {"publisher": publisher, "theme": theme, "themes": themes, "format": format}
-
-        elif spatial_type and spatial_value:
-            # Spatial-only search (no keyword)
-            variants, related_autonomy = _normalize_spatial_name(spatial_value, spatial_type)
-
-            # Try each variant until we get results
-            all_items: list[dict[str, Any]] = []
-            for variant in variants:
-                try:
-                    data = await client.get_datasets_by_spatial(spatial_type, variant, pagination)
-                    items = data.get("result", {}).get("items", [])
-                    all_items.extend(items)
-                except Exception as e:
-                    logger.warning("spatial_search_failed", spatial_type=spatial_type, variant=variant, error=str(e))
-
-            # Also try at Autonomia level if searching by Provincia
-            if related_autonomy and spatial_type.lower() == "provincia":
-                try:
-                    autonomy_data = await client.get_datasets_by_spatial("Autonomia", related_autonomy, pagination)
-                    autonomy_items = autonomy_data.get("result", {}).get("items", [])
-                    # Add items not already in results
-                    existing_uris = {item.get("_about") for item in all_items}
-                    for item in autonomy_items:
-                        if item.get("_about") not in existing_uris:
-                            all_items.append(item)
-                except Exception as e:
-                    logger.warning("autonomy_search_failed", autonomy=related_autonomy, error=str(e))
-
-            # Build combined result
-            data = {"result": {"items": all_items, "page": 0, "itemsPerPage": len(all_items)}}
-            local_filters = {"publisher": publisher, "theme": theme, "themes": themes, "format": format, "keyword": keyword}
-
         elif publisher:
             data = await client.get_datasets_by_publisher(publisher, pagination)
             local_filters = {"theme": theme, "themes": themes, "format": format, "keyword": keyword}
@@ -3065,8 +2760,6 @@ async def _search_datasets_impl(
 
         elif keyword:
             # Search by keyword AND by title to get comprehensive results
-            keywords_to_search = _get_keyword_translations(keyword, spatial_value)
-
             if fetch_all:
                 # Fetch multiple pages for keyword search
                 all_items: list[dict[str, Any]] = []
@@ -3076,7 +2769,7 @@ async def _search_datasets_impl(
 
                 while len(all_items) < max_results and current_page < max_pages:
                     page_pagination = PaginationParams(page=current_page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
-                    page_items = await _search_by_keywords_combined(keywords_to_search, page_pagination)
+                    page_items = await _search_by_keywords_combined([keyword], page_pagination)
 
                     if not page_items:
                         break
@@ -3098,11 +2791,7 @@ async def _search_datasets_impl(
 
                 all_items = all_items[:max_results]
             else:
-                all_items = await _search_by_keywords_combined(keywords_to_search, pagination)
-
-            # If spatial filter provided, filter results locally
-            if spatial_type and spatial_value:
-                all_items = _filter_by_spatial(all_items, spatial_value)
+                all_items = await _search_by_keywords_combined([keyword], pagination)
 
             data = {"result": {"items": all_items, "page": 0, "itemsPerPage": len(all_items), "fetch_all": fetch_all}}
             local_filters = {"publisher": publisher, "theme": theme, "themes": themes, "format": format}
@@ -3150,8 +2839,6 @@ async def search_datasets(
     themes: list[str] | None = None,
     format: str | None = None,
     keyword: str | None = None,
-    spatial_type: str | None = None,
-    spatial_value: str | None = None,
     date_start: str | None = None,
     date_end: str | None = None,
     exact_match: bool = False,
@@ -3186,8 +2873,6 @@ async def search_datasets(
         themes: List of theme IDs for multi-theme search (OR logic). Example: ['economia', 'hacienda'].
         format: Format ID (e.g., 'csv', 'json', 'xml').
         keyword: Keyword/tag to filter by (e.g., 'presupuesto', 'poblacion').
-        spatial_type: Geographic type ('Autonomia', 'Provincia').
-        spatial_value: Geographic value ('Madrid', 'Cataluna', 'Pais-Vasco').
         date_start: Start date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-01-01T00:00Z').
         date_end: End date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-12-31T23:59Z').
         exact_match: If True with title, match whole words only.
@@ -3214,8 +2899,6 @@ async def search_datasets(
         themes=themes,
         format=format,
         keyword=keyword,
-        spatial_type=spatial_type,
-        spatial_value=spatial_value,
         date_start=date_start,
         date_end=date_end,
         exact_match=exact_match,

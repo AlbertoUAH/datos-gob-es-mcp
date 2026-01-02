@@ -74,15 +74,6 @@ class TestDatasetTools:
         assert "datasets" in data
 
     @pytest.mark.asyncio
-    async def test_search_datasets_by_spatial(self, mock_api):
-        """Test search_datasets with spatial filter."""
-        fn = get_tool_fn(search_datasets)
-        result = await fn(spatial_type="Autonomia", spatial_value="Comunidad-Madrid")
-        data = json.loads(result)
-
-        assert "datasets" in data
-
-    @pytest.mark.asyncio
     async def test_search_datasets_by_date_range(self, mock_api):
         """Test search_datasets with date range filter."""
         fn = get_tool_fn(search_datasets)

@@ -1,6 +1,6 @@
-"""MCP Prompts para datos.gob.es - Guías de búsqueda detalladas."""
+"""MCP Prompts para datos.gob.es - Guias de busqueda detalladas."""
 
-from . import buscar_por_tema, datasets_recientes, explorar_catalogo, analisis_dataset, guia_herramientas
+from . import buscar_por_tema, datasets_recientes, explorar_catalogo, analisis_dataset, guia_herramientas, buscar_estadisticas
 
 
 def register_prompts(mcp):
@@ -103,6 +103,26 @@ def register_prompts(mcp):
             include_examples: Si incluir ejemplos de uso practicos
         """
         return guia_herramientas.generate_prompt(tool_category, include_examples)
+
+    @mcp.prompt()
+    def prompt_buscar_estadisticas(
+        tema: str = "empleo",
+        incluir_ine: bool = True,
+        incluir_datos_gob: bool = True
+    ) -> str:
+        """
+        Busqueda guiada de estadisticas oficiales espanolas.
+
+        Este prompt guia para buscar datos estadisticos en el INE (Instituto
+        Nacional de Estadistica) y en datos.gob.es. El INE es la fuente
+        PRINCIPAL de estadisticas oficiales en Espana.
+
+        Args:
+            tema: Tema estadistico (empleo, poblacion, precios, turismo, PIB, etc.)
+            incluir_ine: Buscar en INE - fuente principal de estadisticas (default: True)
+            incluir_datos_gob: Buscar tambien en datos.gob.es (default: True)
+        """
+        return buscar_estadisticas.generate_prompt(tema, incluir_ine, incluir_datos_gob)
 
 
 __all__ = ["register_prompts"]

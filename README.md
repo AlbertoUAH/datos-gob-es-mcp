@@ -23,7 +23,7 @@ Este servidor MCP actua como un **hub centralizado** que conecta multiples APIs 
 
 - **26 herramientas MCP** para consultar multiples APIs de datos publicos
 - **5 recursos MCP** (templates dinamicos) para acceso directo a datos
-- **5 prompts MCP** para guias de busqueda detalladas
+- **6 prompts MCP** para guias de busqueda detalladas
 - **Sistema de notificaciones**: Webhooks para detectar cambios en datasets
 - **Busqueda semantica**: Busqueda por significado usando embeddings (IA)
 - **Busqueda espacial inteligente**: Filtra por ubicacion usando metadatos, titulos y URIs
@@ -171,12 +171,13 @@ flowchart TB
         R5["keyword://{keyword}"]
     end
 
-    subgraph Prompts["PROMPTS (5)"]
+    subgraph Prompts["PROMPTS (6)"]
         P1["buscar_datos_por_tema"]
         P2["datasets_recientes"]
         P3["explorar_catalogo"]
         P4["analisis_dataset"]
         P5["guia_herramientas"]
+        P6["buscar_estadisticas"]
     end
 
     Server --> Tools
@@ -204,7 +205,7 @@ flowchart TB
 |-----------|----------|-------------|
 | **Tools** | 26 | Funciones que el LLM puede invocar |
 | **Resources** | 5 | Templates dinamicos para acceso directo |
-| **Prompts** | 5 | Guias de busqueda predefinidas |
+| **Prompts** | 6 | Guias de busqueda predefinidas |
 
 ---
 
@@ -222,13 +223,15 @@ flowchart TB
 | `list_metadata` | Lista metadatos del catalogo: publicadores (`publishers`), tematicas (`themes`), sectores publicos (`public_sectors`), provincias (`provinces`) o comunidades autonomas (`autonomous_regions`). Cache de 24h |
 | `refresh_metadata_cache` | Fuerza la actualizacion del cache de metadatos (publishers, themes, provincias, etc.) |
 
-### INE - Instituto Nacional de Estadistica (3 herramientas)
+### INE - Instituto Nacional de Estadistica (3 herramientas) - FUENTE PRINCIPAL DE ESTADISTICAS
+
+El INE es la **fuente oficial principal** de estadisticas en Espana. Contiene datos de empleo (EPA), poblacion, precios (IPC), PIB, turismo, censos, y mas.
 
 | Herramienta | Descripcion |
 |-------------|-------------|
-| `ine_list_operations` | Lista operaciones estadisticas del INE. Opcionalmente filtra por texto de busqueda con el parametro `query` |
+| `ine_list_operations` | Busca operaciones estadisticas del INE (empleo, poblacion, IPC, PIB, turismo, etc.). Usa `query` para filtrar |
 | `ine_list_tables` | Lista las tablas disponibles para una operacion estadistica |
-| `ine_get_data` | Obtiene datos de una tabla estadistica del INE con los ultimos N periodos |
+| `ine_get_data` | Obtiene datos estadisticos reales de una tabla del INE |
 
 ### AEMET - Meteorologia (4 herramientas)
 
@@ -279,6 +282,34 @@ Templates dinamicos para acceso directo a datos de datos.gob.es:
 | `publisher://{publisher_id}` | Datasets de un publicador | `publisher://E00003901` |
 | `format://{format_id}` | Datasets en un formato | `format://csv` |
 | `keyword://{keyword}` | Datasets con una palabra clave | `keyword://presupuestos` |
+
+---
+
+## Prompts (Guias de Busqueda)
+
+Los prompts proporcionan guias estructuradas para tareas comunes de busqueda:
+
+| Prompt | Descripcion |
+|--------|-------------|
+| `buscar_datos_por_tema` | Busqueda guiada de datasets por tematica y formato |
+| `datasets_recientes` | Encontrar datasets actualizados en los ultimos dias |
+| `explorar_catalogo` | Exploracion guiada del catalogo de datos abiertos |
+| `analisis_dataset` | Analisis detallado de un dataset especifico |
+| `guia_herramientas` | Documentacion de todas las herramientas MCP |
+| `buscar_estadisticas` | **Busqueda de estadisticas oficiales** consultando INE y datos.gob.es |
+
+### Prompt destacado: buscar_estadisticas
+
+Este prompt guia al asistente para buscar datos estadisticos en **ambas fuentes**:
+
+1. **INE (Instituto Nacional de Estadistica)**: Fuente PRINCIPAL de estadisticas oficiales espanolas (empleo, poblacion, precios, PIB, turismo, etc.)
+2. **datos.gob.es**: Complementa con datasets de otros organismos
+
+```
+Usuario: Busca estadisticas de empleo en Espana
+Asistente: [Usa prompt_buscar_estadisticas(tema="empleo")]
+           -> Consulta INE (EPA, paro) + datos.gob.es
+```
 
 ---
 

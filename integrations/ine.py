@@ -148,24 +148,35 @@ def register_ine_tools(mcp):
         page: int = 0,
         page_size: int = 50,
     ) -> str:
-        """List INE statistical operations, optionally filtered by search query.
+        """Search official Spanish statistics from INE (Instituto Nacional de Estadistica).
 
-        Get statistical operations from the Instituto Nacional de Estadística.
-        Can optionally filter by name using the query parameter.
+        IMPORTANT: INE is Spain's PRIMARY source for official statistics. Use this tool
+        when users ask about Spanish statistics, demographic data, economic indicators,
+        employment data, population, prices (IPC/CPI), GDP, surveys, censuses, etc.
+
+        The INE provides official data on:
+        - Demographics: population, births, deaths, migrations, census
+        - Economy: GDP, industrial production, business statistics, trade
+        - Employment: EPA (labor force survey), unemployment, salaries, working conditions
+        - Prices: IPC (consumer prices), IPRI (industrial prices), housing prices
+        - Society: education, health, living conditions, tourism
+        - Agriculture, environment, science and technology
 
         Args:
-            query: Optional search text to filter operations by name
-                   (e.g., 'empleo', 'población', 'IPC'). If None, lists all.
-            page: Page number starting from 0 (default 0).
-            page_size: Number of operations per page (default 50, max 100).
+            query: Search text to filter operations (e.g., 'empleo', 'poblacion', 'IPC',
+                   'paro', 'turismo', 'censo'). If None, lists all ~600 operations.
+            page: Page number starting from 0.
+            page_size: Results per page (default 50, max 100).
 
         Returns:
-            JSON with operations including ID, name, and code.
+            JSON with statistical operations. Use operation IDs with ine_list_tables.
 
         Examples:
-            ine_list_operations() -> List all operations (paginated)
-            ine_list_operations(query='empleo') -> Search for employment operations
-            ine_list_operations(query='IPC') -> Search for consumer price index
+            ine_list_operations(query='empleo') -> Employment statistics (EPA, etc.)
+            ine_list_operations(query='poblacion') -> Population and demographic data
+            ine_list_operations(query='IPC') -> Consumer Price Index (inflation)
+            ine_list_operations(query='turismo') -> Tourism statistics
+            ine_list_operations(query='PIB') -> GDP and national accounts
         """
         try:
             all_operations = await ine_client.list_operations()
@@ -206,16 +217,22 @@ def register_ine_tools(mcp):
 
     @mcp.tool()
     async def ine_list_tables(operation_id: str) -> str:
-        """List all data tables for an INE statistical operation.
+        """List available data tables for an INE statistical operation.
 
-        Get the list of available tables for a specific INE operation.
-        Use the table IDs to retrieve actual data.
+        After finding an operation with ine_list_operations, use this tool to see
+        what specific data tables are available. Each table contains actual
+        statistical data that can be retrieved with ine_get_data.
 
         Args:
-            operation_id: Operation ID (from ine_search_operations).
+            operation_id: Operation ID from ine_list_operations (e.g., '30308' for EPA).
 
         Returns:
-            JSON with available tables including ID, name, and period.
+            JSON with tables including ID, name, time period, and publication date.
+
+        Example workflow:
+            1. ine_list_operations(query='empleo') -> Find EPA operation (ID: 30308)
+            2. ine_list_tables('30308') -> List available EPA tables
+            3. ine_get_data(table_id) -> Get actual employment data
         """
         try:
             tables = await ine_client.list_tables(operation_id)
@@ -242,17 +259,23 @@ def register_ine_tools(mcp):
         table_id: str,
         n_last: int = 10,
     ) -> str:
-        """Get data from an INE statistical table.
+        """Retrieve actual statistical data from an INE table.
 
-        Retrieve actual data values from a specific INE table.
-        Returns the most recent data periods by default.
+        This is the final step to get real data values from INE. After finding
+        an operation and its tables, use this tool to retrieve the actual
+        statistics (numbers, percentages, indices, etc.).
 
         Args:
-            table_id: Table ID (from ine_list_tables).
-            n_last: Number of last periods to retrieve (default 10, max 100).
+            table_id: Table ID from ine_list_tables.
+            n_last: Number of recent time periods to retrieve (default 10, max 100).
+                    For monthly data, 10 = last 10 months.
+                    For quarterly data, 10 = last 10 quarters.
 
         Returns:
-            JSON with table data including values, dates, and metadata.
+            JSON with statistical data including values, dates, units, and metadata.
+
+        Example:
+            ine_get_data('4247', n_last=12) -> Last 12 periods of unemployment rate
         """
         try:
             n_last = min(max(1, n_last), 100)  # Limit between 1-100

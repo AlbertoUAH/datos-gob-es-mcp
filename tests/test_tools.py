@@ -6,11 +6,7 @@ from server import (
     get_dataset,
     search_datasets,
     get_distributions,
-    list_publishers,
-    list_themes,
-    list_public_sectors,
-    list_provinces,
-    list_autonomous_regions,
+    list_metadata,
 )
 
 
@@ -145,55 +141,69 @@ class TestMetadataTools:
     """Tests for metadata-related MCP tools."""
 
     @pytest.mark.asyncio
-    async def test_list_publishers(self, mock_api):
-        """Test list_publishers tool."""
-        fn = get_tool_fn(list_publishers)
-        result = await fn()
+    async def test_list_metadata_publishers(self, mock_api):
+        """Test list_metadata tool with publishers type."""
+        fn = get_tool_fn(list_metadata)
+        result = await fn(metadata_type="publishers")
         data = json.loads(result)
 
         assert "items" in data
-        # Response format varies based on cache: "total_items" (cached) or "total_in_page" (API)
-        assert "total_items" in data or "total_in_page" in data
+        assert "metadata_type" in data
+        assert data["metadata_type"] == "publishers"
 
     @pytest.mark.asyncio
-    async def test_list_themes(self, mock_api):
-        """Test list_themes tool."""
-        fn = get_tool_fn(list_themes)
-        result = await fn()
+    async def test_list_metadata_themes(self, mock_api):
+        """Test list_metadata tool with themes type."""
+        fn = get_tool_fn(list_metadata)
+        result = await fn(metadata_type="themes")
         data = json.loads(result)
 
         assert "items" in data
-
-
-class TestNTITools:
-    """Tests for NTI-related MCP tools."""
+        assert "metadata_type" in data
+        assert data["metadata_type"] == "themes"
 
     @pytest.mark.asyncio
-    async def test_list_public_sectors(self, mock_api):
-        """Test list_public_sectors tool."""
-        fn = get_tool_fn(list_public_sectors)
-        result = await fn()
+    async def test_list_metadata_public_sectors(self, mock_api):
+        """Test list_metadata tool with public_sectors type."""
+        fn = get_tool_fn(list_metadata)
+        result = await fn(metadata_type="public_sectors")
         data = json.loads(result)
 
         assert "items" in data
+        assert "metadata_type" in data
+        assert data["metadata_type"] == "public_sectors"
 
     @pytest.mark.asyncio
-    async def test_list_provinces(self, mock_api):
-        """Test list_provinces tool."""
-        fn = get_tool_fn(list_provinces)
-        result = await fn()
+    async def test_list_metadata_provinces(self, mock_api):
+        """Test list_metadata tool with provinces type."""
+        fn = get_tool_fn(list_metadata)
+        result = await fn(metadata_type="provinces")
         data = json.loads(result)
 
         assert "items" in data
+        assert "metadata_type" in data
+        assert data["metadata_type"] == "provinces"
 
     @pytest.mark.asyncio
-    async def test_list_autonomous_regions(self, mock_api):
-        """Test list_autonomous_regions tool."""
-        fn = get_tool_fn(list_autonomous_regions)
-        result = await fn()
+    async def test_list_metadata_autonomous_regions(self, mock_api):
+        """Test list_metadata tool with autonomous_regions type."""
+        fn = get_tool_fn(list_metadata)
+        result = await fn(metadata_type="autonomous_regions")
         data = json.loads(result)
 
         assert "items" in data
+        assert "metadata_type" in data
+        assert data["metadata_type"] == "autonomous_regions"
+
+    @pytest.mark.asyncio
+    async def test_list_metadata_invalid_type(self, mock_api):
+        """Test list_metadata tool with invalid type returns error."""
+        fn = get_tool_fn(list_metadata)
+        result = await fn(metadata_type="invalid_type")
+        data = json.loads(result)
+
+        assert "error" in data
+        assert "valid_types" in data
 
 
 class TestToolErrorHandling:
@@ -204,13 +214,13 @@ class TestToolErrorHandling:
         """Test that tools return error as JSON when API fails."""
         import respx
 
-        # Use list_publishers with use_cache=False to force API call
-        fn = get_tool_fn(list_publishers)
+        # Use list_metadata with use_cache=False to force API call
+        fn = get_tool_fn(list_metadata)
 
         with respx.mock:
             respx.get(url__regex=r".*").respond(status_code=500, json={"error": "Server error"})
 
-            result = await fn(use_cache=False)
+            result = await fn(metadata_type="publishers", use_cache=False)
             data = json.loads(result)
 
             assert "error" in data

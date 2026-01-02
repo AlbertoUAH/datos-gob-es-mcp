@@ -143,23 +143,53 @@ def register_ine_tools(mcp):
     """Register INE tools with the MCP server."""
 
     @mcp.tool()
-    async def ine_search_operations(query: str) -> str:
-        """Search INE statistical operations by name.
+    async def ine_list_operations(
+        query: str | None = None,
+        page: int = 0,
+        page_size: int = 50,
+    ) -> str:
+        """List INE statistical operations, optionally filtered by search query.
 
-        Search for statistical operations from the Instituto Nacional de Estadística.
-        Returns operations whose name contains the search query.
+        Get statistical operations from the Instituto Nacional de Estadística.
+        Can optionally filter by name using the query parameter.
 
         Args:
-            query: Search text to find in operation names (e.g., 'empleo', 'población', 'IPC').
+            query: Optional search text to filter operations by name
+                   (e.g., 'empleo', 'población', 'IPC'). If None, lists all.
+            page: Page number starting from 0 (default 0).
+            page_size: Number of operations per page (default 50, max 100).
 
         Returns:
-            JSON with matching operations including ID, name, and code.
+            JSON with operations including ID, name, and code.
+
+        Examples:
+            ine_list_operations() -> List all operations (paginated)
+            ine_list_operations(query='empleo') -> Search for employment operations
+            ine_list_operations(query='IPC') -> Search for consumer price index
         """
         try:
-            results = await ine_client.search_operations(query)
+            all_operations = await ine_client.list_operations()
+
+            # Filter by query if provided
+            if query:
+                query_lower = query.lower()
+                all_operations = [
+                    op for op in all_operations
+                    if query_lower in op.get("Nombre", "").lower()
+                ]
+
+            # Apply pagination
+            page_size = min(max(1, page_size), 100)
+            start = page * page_size
+            end = start + page_size
+            paginated = all_operations[start:end]
+
             output = {
                 "query": query,
-                "total_results": len(results),
+                "total_operations": len(all_operations),
+                "page": page,
+                "page_size": page_size,
+                "total_pages": (len(all_operations) + page_size - 1) // page_size if all_operations else 0,
                 "operations": [
                     {
                         "id": op.get("Id"),
@@ -167,12 +197,12 @@ def register_ine_tools(mcp):
                         "name": op.get("Nombre"),
                         "url": op.get("Url"),
                     }
-                    for op in results[:50]  # Limit results
+                    for op in paginated
                 ],
             }
             return json.dumps(output, ensure_ascii=False, indent=2)
         except Exception as e:
-            return _handle_error(e)
+            return _handle_error(e, context="ine_list_operations")
 
     @mcp.tool()
     async def ine_list_tables(operation_id: str) -> str:
@@ -248,45 +278,3 @@ def register_ine_tools(mcp):
             return json.dumps(output, ensure_ascii=False, indent=2)
         except Exception as e:
             return _handle_error(e)
-
-    @mcp.tool()
-    async def ine_list_operations(page: int = 0, page_size: int = 50) -> str:
-        """List available INE statistical operations with pagination.
-
-        Get the list of statistical operations available from INE.
-        Use operation IDs to explore tables and data.
-
-        Args:
-            page: Page number starting from 0 (default 0).
-            page_size: Number of operations per page (default 50, max 100).
-
-        Returns:
-            JSON with paginated operations.
-        """
-        try:
-            # Fetch all operations (INE API doesn't support pagination natively)
-            all_operations = await ine_client.list_operations()
-
-            # Apply pagination
-            page_size = min(max(1, page_size), 100)  # Limit to 1-100
-            start = page * page_size
-            end = start + page_size
-            paginated = all_operations[start:end]
-
-            output = {
-                "total_operations": len(all_operations),
-                "page": page,
-                "page_size": page_size,
-                "total_pages": (len(all_operations) + page_size - 1) // page_size,
-                "operations": [
-                    {
-                        "id": op.get("Id"),
-                        "code": op.get("Cod_IOE"),
-                        "name": op.get("Nombre"),
-                    }
-                    for op in paginated
-                ],
-            }
-            return json.dumps(output, ensure_ascii=False, indent=2)
-        except Exception as e:
-            return _handle_error(e, context="ine_list_operations")

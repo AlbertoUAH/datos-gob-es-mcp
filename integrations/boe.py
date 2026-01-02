@@ -231,25 +231,60 @@ def register_boe_tools(mcp):
     """Register BOE tools with the MCP server."""
 
     @mcp.tool()
-    async def boe_get_summary(date: str) -> str:
-        """Get the BOE (Official State Gazette) summary for a specific date.
+    async def boe_get_summary(date: str | None = None) -> str:
+        """Get the BOE (Official State Gazette) summary.
 
-        Retrieve the complete index of all documents published in the BOE
-        for a given date. Includes laws, royal decrees, resolutions, and
-        other official publications.
+        Retrieve the complete index of all documents published in the BOE.
+        Includes laws, royal decrees, resolutions, and other official publications.
 
         Args:
-            date: Date in format YYYYMMDD (e.g., '20241226' for December 26, 2024).
-                Note: BOE is not published on weekends or public holidays.
+            date: Date in format YYYYMMDD (e.g., '20250102' for January 2, 2025).
+                  If None, returns the most recent available BOE (today or up to 7 days back).
+                  Note: BOE is not published on weekends or public holidays.
 
         Returns:
             JSON with BOE summary including sections, departments, and document titles.
+
+        Examples:
+            boe_get_summary() -> Get today's BOE (or most recent)
+            boe_get_summary('20250102') -> Get BOE for January 2, 2025
         """
+        from datetime import timedelta
+
         try:
-            # Validate date format
-            if not date or len(date) != 8 or not date.isdigit():
+            # If no date provided, get most recent BOE
+            if date is None:
+                today = datetime.now()
+                dates_tried = []
+
+                for i in range(7):  # Try up to 7 days back
+                    check_date = today - timedelta(days=i)
+                    date_str = check_date.strftime("%Y%m%d")
+                    dates_tried.append(date_str)
+                    try:
+                        data = await boe_client.get_summary(date_str)
+                        if data:
+                            formatted = _format_summary(data)
+                            if i == 0:
+                                formatted["note"] = f"BOE de hoy ({check_date.strftime('%d/%m/%Y')})"
+                            else:
+                                formatted["note"] = f"BOE mas reciente: {check_date.strftime('%d/%m/%Y')} (hace {i} dias)"
+                            return json.dumps(formatted, ensure_ascii=False, indent=2)
+                    except BOEClientError as e:
+                        logger.info("boe_date_not_available", date=date_str, error=str(e))
+                        continue
+
                 return json.dumps({
-                    "error": "Invalid date format. Use YYYYMMDD (e.g., '20241226')",
+                    "error": "No BOE available in the last 7 days",
+                    "dates_tried": dates_tried,
+                    "today": today.strftime("%Y%m%d"),
+                    "reason": "This may happen during extended holiday periods (e.g., Christmas, New Year).",
+                }, ensure_ascii=False, indent=2)
+
+            # Validate date format
+            if len(date) != 8 or not date.isdigit():
+                return json.dumps({
+                    "error": "Invalid date format. Use YYYYMMDD (e.g., '20250102')",
                     "provided": date,
                 }, ensure_ascii=False, indent=2)
 
@@ -260,7 +295,7 @@ def register_boe_tools(mcp):
                 if parsed_date.weekday() >= 5:  # 5=Saturday, 6=Sunday
                     return json.dumps({
                         "warning": f"Date {date} is a weekend. BOE is not published on weekends.",
-                        "suggestion": "Try a weekday date instead.",
+                        "suggestion": "Try calling boe_get_summary() without a date to get the most recent BOE.",
                     }, ensure_ascii=False, indent=2)
             except ValueError:
                 return json.dumps({
@@ -275,7 +310,7 @@ def register_boe_tools(mcp):
                 return json.dumps({
                     "error": f"No BOE available for date {date}",
                     "reason": "This date may be a public holiday or the BOE was not published.",
-                    "suggestion": "Try boe_get_today to get the most recent BOE.",
+                    "suggestion": "Try calling boe_get_summary() without a date to get the most recent BOE.",
                 }, ensure_ascii=False, indent=2)
             return _handle_error(e, context="boe_get_summary")
         except Exception as e:
@@ -391,47 +426,3 @@ def register_boe_tools(mcp):
             return json.dumps(output, ensure_ascii=False, indent=2)
         except Exception as e:
             return _handle_error(e, context="boe_search")
-
-    @mcp.tool()
-    async def boe_get_today() -> str:
-        """Get today's BOE summary.
-
-        Retrieve the summary of today's Official State Gazette.
-        If today's BOE is not available (weekend/holiday), returns
-        the most recent available BOE.
-
-        Returns:
-            JSON with today's (or most recent) BOE summary.
-        """
-        try:
-            # Try today and previous days until we find a BOE
-            from datetime import timedelta
-
-            today = datetime.now()
-            dates_tried = []
-
-            for i in range(7):  # Try up to 7 days back
-                date = today - timedelta(days=i)
-                date_str = date.strftime("%Y%m%d")
-                dates_tried.append(date_str)
-                try:
-                    data = await boe_client.get_summary(date_str)
-                    if data:
-                        formatted = _format_summary(data)
-                        if i == 0:
-                            formatted["note"] = f"BOE de hoy ({date.strftime('%d/%m/%Y')})"
-                        else:
-                            formatted["note"] = f"BOE mas reciente: {date.strftime('%d/%m/%Y')} (hace {i} dias)"
-                        return json.dumps(formatted, ensure_ascii=False, indent=2)
-                except BOEClientError as e:
-                    logger.info("boe_date_not_available", date=date_str, error=str(e))
-                    continue
-
-            return json.dumps({
-                "error": "No BOE available in the last 7 days",
-                "dates_tried": dates_tried,
-                "today": today.strftime("%Y%m%d"),
-                "reason": "This may happen during extended holiday periods (e.g., Christmas, New Year).",
-            }, ensure_ascii=False, indent=2)
-        except Exception as e:
-            return _handle_error(e, context="boe_get_today")

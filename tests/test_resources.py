@@ -3,10 +3,6 @@
 import json
 import pytest
 from server import (
-    resource_themes,
-    resource_publishers,
-    resource_provinces,
-    resource_autonomous_regions,
     resource_dataset,
     resource_theme_datasets,
     resource_publisher_datasets,
@@ -20,47 +16,6 @@ def get_resource_fn(resource):
     if hasattr(resource, 'fn'):
         return resource.fn
     return resource
-
-
-class TestStaticResources:
-    """Tests for static MCP resources."""
-
-    @pytest.mark.asyncio
-    async def test_resource_themes(self, mock_api):
-        """Test catalog://themes resource."""
-        fn = get_resource_fn(resource_themes)
-        result = await fn()
-        data = json.loads(result)
-
-        assert "items" in data
-        assert "total_in_page" in data
-
-    @pytest.mark.asyncio
-    async def test_resource_publishers(self, mock_api):
-        """Test catalog://publishers resource."""
-        fn = get_resource_fn(resource_publishers)
-        result = await fn()
-        data = json.loads(result)
-
-        assert "items" in data
-
-    @pytest.mark.asyncio
-    async def test_resource_provinces(self, mock_api):
-        """Test catalog://provinces resource."""
-        fn = get_resource_fn(resource_provinces)
-        result = await fn()
-        data = json.loads(result)
-
-        assert "items" in data
-
-    @pytest.mark.asyncio
-    async def test_resource_autonomous_regions(self, mock_api):
-        """Test catalog://autonomous-regions resource."""
-        fn = get_resource_fn(resource_autonomous_regions)
-        result = await fn()
-        data = json.loads(result)
-
-        assert "items" in data
 
 
 class TestDynamicResources:
@@ -120,12 +75,12 @@ class TestResourceErrorHandling:
         """Test that resources return error as JSON when API fails."""
         import respx
 
-        fn = get_resource_fn(resource_themes)
+        fn = get_resource_fn(resource_dataset)
 
         with respx.mock:
             respx.get(url__regex=r".*").respond(status_code=500, json={"error": "Server error"})
 
-            result = await fn()
+            result = await fn("test-dataset-123")
             data = json.loads(result)
 
             assert "error" in data

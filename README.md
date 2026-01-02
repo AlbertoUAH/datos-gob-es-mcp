@@ -21,8 +21,8 @@ Este servidor MCP actua como un **hub centralizado** que conecta multiples APIs 
 
 ### Caracteristicas
 
-- **32 herramientas MCP** para consultar multiples APIs de datos publicos
-- **13 recursos MCP** (9 estaticos + 4 templates dinamicos) para acceso directo a datos
+- **26 herramientas MCP** para consultar multiples APIs de datos publicos
+- **5 recursos MCP** (templates dinamicos) para acceso directo a datos
 - **5 prompts MCP** para guias de busqueda detalladas
 - **Sistema de notificaciones**: Webhooks para detectar cambios en datasets
 - **Busqueda semantica**: Busqueda por significado usando embeddings (IA)
@@ -103,106 +103,174 @@ mcp run server.py
 make inspect
 ```
 
+## Arquitectura
+
+```mermaid
+flowchart TB
+    subgraph Cliente["Cliente MCP"]
+        ChatGPT["ChatGPT"]
+    end
+
+    subgraph MCP["Servidor MCP (FastMCP)"]
+        Server["server.py"]
+    end
+
+    ChatGPT <-->|"Protocolo MCP"| Server
+
+    subgraph Tools["TOOLS (26)"]
+        subgraph ToolsDatosGob["datos.gob.es (7)"]
+            search_datasets
+            get_dataset
+            get_distributions
+            download_data
+            get_related_datasets
+            list_metadata
+            refresh_metadata_cache
+        end
+
+        subgraph ToolsINE["INE (3)"]
+            ine_list_operations
+            ine_list_tables
+            ine_get_data
+        end
+
+        subgraph ToolsAEMET["AEMET (4)"]
+            aemet_list_stations
+            aemet_list_municipalities
+            aemet_get_observations
+            aemet_get_forecast
+        end
+
+        subgraph ToolsBOE["BOE (3)"]
+            boe_get_summary
+            boe_get_document
+            boe_search
+        end
+
+        subgraph ToolsWebhooks["Webhooks (6)"]
+            webhook_register
+            webhook_list
+            webhook_delete
+            webhook_test
+            check_dataset_changes
+            list_watched_datasets
+        end
+
+        subgraph ToolsUtils["Utilidades (3)"]
+            export_results
+            get_usage_stats
+            clear_usage_stats
+        end
+    end
+
+    subgraph Resources["RESOURCES (5)"]
+        R1["dataset://{id}"]
+        R2["theme://{id}"]
+        R3["publisher://{id}"]
+        R4["format://{id}"]
+        R5["keyword://{keyword}"]
+    end
+
+    subgraph Prompts["PROMPTS (5)"]
+        P1["buscar_datos_por_tema"]
+        P2["datasets_recientes"]
+        P3["explorar_catalogo"]
+        P4["analisis_dataset"]
+        P5["guia_herramientas"]
+    end
+
+    Server --> Tools
+    Server --> Resources
+    Server --> Prompts
+
+    subgraph APIs["APIs REST Externas"]
+        API1["datos.gob.es"]
+        API2["INE"]
+        API3["AEMET"]
+        API4["BOE"]
+    end
+
+    ToolsDatosGob --> API1
+    ToolsWebhooks --> API1
+    Resources --> API1
+    ToolsINE --> API2
+    ToolsAEMET --> API3
+    ToolsBOE --> API4
+```
+
 ## Capacidades MCP
 
 | Capacidad | Cantidad | Descripcion |
 |-----------|----------|-------------|
-| **Tools** | 32 | Funciones que el LLM puede invocar |
-| **Resources** | 13 | Datos estaticos y dinamicos accesibles |
+| **Tools** | 26 | Funciones que el LLM puede invocar |
+| **Resources** | 5 | Templates dinamicos para acceso directo |
 | **Prompts** | 5 | Guias de busqueda predefinidas |
 
 ---
 
 ## Tools (Herramientas)
 
-### Datasets - datos.gob.es (5 herramientas principales)
+### datos.gob.es (7 herramientas)
 
 | Herramienta | Descripcion |
 |-------------|-------------|
-| `search_datasets` | Busqueda unificada: filtros, semantica e hibrida. Soporta multi-tema con logica OR |
-| `get_dataset` | Obtener un dataset por su ID |
-| `download_data` | **Nuevo**: Descargar datos completos de un dataset (hasta 50MB) |
-| `get_related_datasets` | **Nuevo**: Encontrar datasets similares usando IA (embeddings) |
-| `get_distributions` | Obtener archivos descargables de un dataset |
+| `search_datasets` | Busqueda unificada de datasets: por filtros (titulo, tema, publicador, formato, fecha), semantica (IA con embeddings) o hibrida. Soporta multi-tema con logica OR y paginacion paralela |
+| `get_dataset` | Obtiene metadatos completos de un dataset por su ID: titulo, descripcion, publicador, frecuencia de actualizacion, formatos disponibles y distribuciones |
+| `get_distributions` | Lista los archivos descargables de un dataset con sus formatos (CSV, JSON, XML, etc.) y URLs de acceso |
+| `download_data` | Descarga y parsea datos de un dataset (hasta 50MB). Soporta CSV y JSON, devuelve preview de filas |
+| `get_related_datasets` | Encuentra datasets similares usando busqueda semantica con embeddings de IA |
+| `list_metadata` | Lista metadatos del catalogo: publicadores (`publishers`), tematicas (`themes`), sectores publicos (`public_sectors`), provincias (`provinces`) o comunidades autonomas (`autonomous_regions`). Cache de 24h |
+| `refresh_metadata_cache` | Fuerza la actualizacion del cache de metadatos (publishers, themes, provincias, etc.) |
 
-### Metadatos (3 herramientas con cache 24h)
-
-| Herramienta | Descripcion |
-|-------------|-------------|
-| `list_publishers` | Listar todos los publicadores (organismos). Cache 24h |
-| `list_themes` | Listar todas las tematicas/categorias. Cache 24h |
-| `refresh_metadata_cache` | **Nuevo**: Forzar actualizacion del cache de metadatos |
-
-### NTI - Norma Tecnica de Interoperabilidad (3 herramientas con cache 24h)
+### INE - Instituto Nacional de Estadistica (3 herramientas)
 
 | Herramienta | Descripcion |
 |-------------|-------------|
-| `list_public_sectors` | Listar sectores publicos. Cache 24h |
-| `list_provinces` | Listar provincias espanolas. Cache 24h |
-| `list_autonomous_regions` | Listar Comunidades Autonomas. Cache 24h |
+| `ine_list_operations` | Lista operaciones estadisticas del INE. Opcionalmente filtra por texto de busqueda con el parametro `query` |
+| `ine_list_tables` | Lista las tablas disponibles para una operacion estadistica |
+| `ine_get_data` | Obtiene datos de una tabla estadistica del INE con los ultimos N periodos |
 
-### Integraciones Externas
-
-#### INE - Instituto Nacional de Estadistica (4 herramientas)
+### AEMET - Meteorologia (4 herramientas)
 
 | Herramienta | Descripcion |
 |-------------|-------------|
-| `ine_list_operations` | Listar operaciones estadisticas |
-| `ine_search_operations` | Buscar operaciones por texto |
-| `ine_list_tables` | Listar tablas de una operacion |
-| `ine_get_data` | Obtener datos de una tabla |
+| `aemet_list_stations` | Lista todas las estaciones meteorologicas de AEMET con su ubicacion |
+| `aemet_list_municipalities` | Lista los municipios espanoles con codigos para predicciones |
+| `aemet_get_observations` | Obtiene observaciones meteorologicas actuales de una estacion |
+| `aemet_get_forecast` | Obtiene la prediccion meteorologica para un municipio |
 
-#### AEMET - Meteorologia (4 herramientas)
-
-| Herramienta | Descripcion |
-|-------------|-------------|
-| `aemet_list_stations` | Listar estaciones meteorologicas |
-| `aemet_list_municipalities` | Listar municipios |
-| `aemet_get_observations` | Obtener observaciones de una estacion |
-| `aemet_get_forecast` | Obtener prediccion para un municipio |
-
-#### BOE - Boletin Oficial del Estado (4 herramientas)
+### BOE - Boletin Oficial del Estado (3 herramientas)
 
 | Herramienta | Descripcion |
 |-------------|-------------|
-| `boe_get_today` | Obtener sumario del BOE de hoy |
-| `boe_get_summary` | Obtener sumario de una fecha |
-| `boe_get_document` | Obtener documento por ID |
-| `boe_search` | Buscar documentos |
+| `boe_get_summary` | Obtiene el sumario del BOE. Si no se especifica fecha, devuelve el BOE mas reciente (hoy o hasta 7 dias atras) |
+| `boe_get_document` | Obtiene metadatos completos de un documento del BOE por su ID (ej: `BOE-A-2024-12345`) |
+| `boe_search` | Busca documentos en el BOE por texto en un rango de fechas (hasta 90 dias) |
 
-#### Webhooks - Notificaciones (5 herramientas)
-
-| Herramienta | Descripcion |
-|-------------|-------------|
-| `webhook_register` | Registrar webhook para un dataset |
-| `webhook_list` | Listar webhooks registrados |
-| `webhook_delete` | Eliminar webhook |
-| `webhook_test` | Probar webhook |
-| `check_dataset_changes` | Verificar cambios en datasets vigilados |
-| `list_watched_datasets` | Listar datasets vigilados |
-
-#### Utilidades (3 herramientas)
+### Webhooks - Notificaciones (6 herramientas)
 
 | Herramienta | Descripcion |
 |-------------|-------------|
-| `export_results` | **Nuevo**: Exportar resultados de busqueda a CSV o JSON |
-| `get_usage_stats` | **Nuevo**: Ver estadisticas de uso de herramientas y datasets |
-| `clear_usage_stats` | **Nuevo**: Limpiar estadisticas de uso |
+| `webhook_register` | Registra un webhook para recibir notificaciones cuando un dataset cambie |
+| `webhook_list` | Lista todos los webhooks registrados |
+| `webhook_delete` | Elimina un webhook por su ID |
+| `webhook_test` | Envia una notificacion de prueba a un webhook |
+| `check_dataset_changes` | Verifica si un dataset ha cambiado desde la ultima comprobacion |
+| `list_watched_datasets` | Lista los datasets que estan siendo vigilados por cambios |
+
+### Utilidades (3 herramientas)
+
+| Herramienta | Descripcion |
+|-------------|-------------|
+| `export_results` | Exporta resultados de busqueda a formato CSV o JSON |
+| `get_usage_stats` | Muestra estadisticas de uso: tools mas usadas, datasets mas accedidos |
+| `clear_usage_stats` | Limpia las estadisticas de uso acumuladas |
 
 ---
 
 ## Resources (Recursos)
 
-### Recursos Estaticos
-
-| URI | Descripcion |
-|-----|-------------|
-| `catalog://themes` | Lista de todas las tematicas disponibles |
-| `catalog://publishers` | Lista de todos los organismos publicadores |
-| `catalog://provinces` | Lista de provincias espanolas |
-| `catalog://autonomous-regions` | Lista de Comunidades Autonomas |
-
-### Resource Templates Dinamicos
+Templates dinamicos para acceso directo a datos de datos.gob.es:
 
 | URI Template | Descripcion | Ejemplo |
 |--------------|-------------|---------|
@@ -265,11 +333,38 @@ Usuario: Exporta estos resultados a CSV
 Asistente: [Usa export_results(search_results="...", format="csv")]
 ```
 
-### Ver estadisticas de uso (nuevo)
+### Ver estadisticas de uso
 
 ```
 Usuario: Que herramientas he usado mas?
 Asistente: [Usa get_usage_stats(include_searches=true)]
+```
+
+### Listar metadatos del catalogo
+
+```
+Usuario: Muestra las tematicas disponibles
+Asistente: [Usa list_metadata(metadata_type="themes")]
+
+Usuario: Lista las provincias espanolas
+Asistente: [Usa list_metadata(metadata_type="provinces")]
+```
+
+### Buscar operaciones del INE
+
+```
+Usuario: Busca estadisticas sobre empleo
+Asistente: [Usa ine_list_operations(query="empleo")]
+```
+
+### Obtener el BOE mas reciente
+
+```
+Usuario: Dame el BOE de hoy
+Asistente: [Usa boe_get_summary()]
+
+Usuario: Dame el BOE del 2 de enero de 2025
+Asistente: [Usa boe_get_summary(date="20250102")]
 ```
 
 ## Configuracion en Clientes MCP

@@ -3342,32 +3342,75 @@ async def download_data(
 
 
 @mcp.tool()
-async def list_publishers(
+async def list_metadata(
+    metadata_type: str,
     page: int = 0,
     use_cache: bool = True,
 ) -> str:
-    """List all data publishers (government organizations).
+    """List metadata from datos.gob.es catalog.
 
-    Get a list of all institutions that publish data on datos.gob.es.
-    Use the publisher IDs to filter datasets by organization.
-
+    Unified tool to list different types of catalog metadata.
     Results are cached for 24 hours to improve performance.
 
     Args:
+        metadata_type: Type of metadata to list. Valid values:
+            - 'publishers': Government organizations that publish data
+            - 'themes': Dataset categories (economia, salud, educacion, etc.)
+            - 'public_sectors': NTI public sector taxonomy
+            - 'provinces': Spanish provinces (50 + Ceuta and Melilla)
+            - 'autonomous_regions': Spanish autonomous communities (17 + 2 cities)
         page: Page number (starting from 0). Ignored when use_cache=True.
         use_cache: Use cached data if available (default True). Set False to force fresh fetch.
 
     Returns:
-        JSON with publisher organizations and their IDs.
+        JSON with metadata items and pagination info.
+
+    Examples:
+        list_metadata('themes') -> List all dataset categories
+        list_metadata('publishers') -> List all publishing organizations
+        list_metadata('provinces') -> List Spanish provinces
     """
+    # Map metadata types to cache functions and client methods
+    METADATA_CONFIG = {
+        'publishers': {
+            'cache_fn': metadata_cache.get_publishers,
+            'client_fn': client.list_publishers,
+        },
+        'themes': {
+            'cache_fn': metadata_cache.get_themes,
+            'client_fn': client.list_themes,
+        },
+        'public_sectors': {
+            'cache_fn': metadata_cache.get_public_sectors,
+            'client_fn': client.list_public_sectors,
+        },
+        'provinces': {
+            'cache_fn': metadata_cache.get_provinces,
+            'client_fn': client.list_provinces,
+        },
+        'autonomous_regions': {
+            'cache_fn': metadata_cache.get_autonomous_regions,
+            'client_fn': client.list_autonomous_regions,
+        },
+    }
+
+    if metadata_type not in METADATA_CONFIG:
+        return json.dumps({
+            "error": f"Invalid metadata_type: '{metadata_type}'",
+            "valid_types": list(METADATA_CONFIG.keys()),
+            "hint": "Use one of the valid_types listed above",
+        }, ensure_ascii=False, indent=2)
+
+    config = METADATA_CONFIG[metadata_type]
+
     try:
         if use_cache:
-            items = await metadata_cache.get_publishers(client)
-            # Apply pagination to cached results
+            items = await config['cache_fn'](client)
             start = page * DEFAULT_PAGE_SIZE
             end = start + DEFAULT_PAGE_SIZE
             page_items = items[start:end]
             return json.dumps({
+                "metadata_type": metadata_type,
                 "total_items": len(items),
                 "page": page,
                 "items_per_page": DEFAULT_PAGE_SIZE,
@@ -3376,170 +3419,7 @@ async def list_publishers(
             }, ensure_ascii=False, indent=2)
         else:
             pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-            data = await client.list_publishers(pagination)
-            return _format_response(data)
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.tool()
-async def list_themes(
-    page: int = 0,
-    use_cache: bool = True,
-) -> str:
-    """List all dataset categories/themes.
-
-    Get all topic categories used to classify datasets.
-    Common themes: economia, hacienda, educacion, salud, transporte, etc.
-
-    Results are cached for 24 hours to improve performance.
-
-    Args:
-        page: Page number (starting from 0). Ignored when use_cache=True.
-        use_cache: Use cached data if available (default True). Set False to force fresh fetch.
-
-    Returns:
-        JSON with available themes and their labels.
-    """
-    try:
-        if use_cache:
-            items = await metadata_cache.get_themes(client)
-            start = page * DEFAULT_PAGE_SIZE
-            end = start + DEFAULT_PAGE_SIZE
-            page_items = items[start:end]
-            return json.dumps({
-                "total_items": len(items),
-                "page": page,
-                "items_per_page": DEFAULT_PAGE_SIZE,
-                "cached": True,
-                "items": page_items,
-            }, ensure_ascii=False, indent=2)
-        else:
-            pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-            data = await client.list_themes(pagination)
-            return _format_response(data)
-    except Exception as e:
-        return _handle_error(e)
-
-
-# =============================================================================
-# NTI TOOLS (Norma Técnica de Interoperabilidad)
-# =============================================================================
-
-
-@mcp.tool()
-async def list_public_sectors(
-    page: int = 0,
-    use_cache: bool = True,
-) -> str:
-    """List all public sectors from NTI taxonomy.
-
-    Get sectors defined by Spain's Technical Interoperability Standard.
-    Includes: comercio, educacion, salud, justicia, etc.
-
-    Results are cached for 24 hours to improve performance.
-
-    Args:
-        page: Page number (starting from 0). Ignored when use_cache=True.
-        use_cache: Use cached data if available (default True). Set False to force fresh fetch.
-
-    Returns:
-        JSON with public sector categories.
-    """
-    try:
-        if use_cache:
-            items = await metadata_cache.get_public_sectors(client)
-            start = page * DEFAULT_PAGE_SIZE
-            end = start + DEFAULT_PAGE_SIZE
-            page_items = items[start:end]
-            return json.dumps({
-                "total_items": len(items),
-                "page": page,
-                "items_per_page": DEFAULT_PAGE_SIZE,
-                "cached": True,
-                "items": page_items,
-            }, ensure_ascii=False, indent=2)
-        else:
-            pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-            data = await client.list_public_sectors(pagination)
-            return _format_response(data)
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.tool()
-async def list_provinces(
-    page: int = 0,
-    use_cache: bool = True,
-) -> str:
-    """List all Spanish provinces.
-
-    Get the 50 provinces of Spain plus Ceuta and Melilla.
-
-    Results are cached for 24 hours to improve performance.
-
-    Args:
-        page: Page number (starting from 0). Ignored when use_cache=True.
-        use_cache: Use cached data if available (default True). Set False to force fresh fetch.
-
-    Returns:
-        JSON with Spanish provinces.
-    """
-    try:
-        if use_cache:
-            items = await metadata_cache.get_provinces(client)
-            start = page * DEFAULT_PAGE_SIZE
-            end = start + DEFAULT_PAGE_SIZE
-            page_items = items[start:end]
-            return json.dumps({
-                "total_items": len(items),
-                "page": page,
-                "items_per_page": DEFAULT_PAGE_SIZE,
-                "cached": True,
-                "items": page_items,
-            }, ensure_ascii=False, indent=2)
-        else:
-            pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-            data = await client.list_provinces(pagination)
-            return _format_response(data)
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.tool()
-async def list_autonomous_regions(
-    page: int = 0,
-    use_cache: bool = True,
-) -> str:
-    """List all Spanish autonomous regions (Comunidades Autónomas).
-
-    Get Spain's 17 autonomous communities plus Ceuta and Melilla.
-
-    Results are cached for 24 hours to improve performance.
-
-    Args:
-        page: Page number (starting from 0). Ignored when use_cache=True.
-        use_cache: Use cached data if available (default True). Set False to force fresh fetch.
-
-    Returns:
-        JSON with autonomous regions.
-    """
-    try:
-        if use_cache:
-            items = await metadata_cache.get_autonomous_regions(client)
-            start = page * DEFAULT_PAGE_SIZE
-            end = start + DEFAULT_PAGE_SIZE
-            page_items = items[start:end]
-            return json.dumps({
-                "total_items": len(items),
-                "page": page,
-                "items_per_page": DEFAULT_PAGE_SIZE,
-                "cached": True,
-                "items": page_items,
-            }, ensure_ascii=False, indent=2)
-        else:
-            pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-            data = await client.list_autonomous_regions(pagination)
+            data = await config['client_fn'](pagination)
             return _format_response(data)
     except Exception as e:
         return _handle_error(e)
@@ -3734,117 +3614,6 @@ async def clear_usage_stats() -> str:
         "status": "success",
         "message": "Usage statistics cleared.",
     }, ensure_ascii=False, indent=2)
-
-
-# =============================================================================
-# RESOURCES - Static Catalogs (cached data for quick access)
-# =============================================================================
-
-
-@mcp.resource("catalog://themes")
-async def resource_themes() -> str:
-    """
-    Catálogo completo de temáticas/categorías disponibles en datos.gob.es.
-
-    Este recurso proporciona acceso rápido a todas las categorías temáticas
-    que se usan para clasificar los datasets del portal de datos abiertos.
-
-    Temáticas principales incluyen:
-    - economia: Datos económicos, PIB, comercio, empresas
-    - hacienda: Presupuestos, impuestos, gasto público
-    - educacion: Sistema educativo, universidades, becas
-    - salud: Sanidad, hospitales, epidemiología
-    - medio-ambiente: Calidad del aire, agua, residuos
-    - transporte: Movilidad, carreteras, transporte público
-    - turismo: Visitantes, alojamientos, destinos
-    - empleo: Mercado laboral, paro, contratación
-    - sector-publico: Administración, funcionarios
-    - ciencia-tecnologia: I+D, innovación, patentes
-    """
-    try:
-        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.list_themes(pagination)
-        return _format_response(data)
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.resource("catalog://publishers")
-async def resource_publishers() -> str:
-    """
-    Catálogo de organismos publicadores de datos en datos.gob.es.
-
-    Este recurso lista todas las instituciones gubernamentales y organismos
-    públicos que publican datos abiertos en el portal.
-
-    Incluye organismos como:
-    - INE (Instituto Nacional de Estadística)
-    - Ministerios del Gobierno de España
-    - Comunidades Autónomas
-    - Ayuntamientos y Diputaciones
-    - Organismos autónomos y agencias estatales
-    - Universidades públicas
-
-    Cada publicador tiene un ID único que puede usarse para filtrar datasets.
-    """
-    try:
-        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.list_publishers(pagination)
-        return _format_response(data)
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.resource("catalog://provinces")
-async def resource_provinces() -> str:
-    """
-    Catálogo de las 52 provincias españolas según la NTI.
-
-    Este recurso proporciona la lista completa de provincias de España,
-    incluyendo las 50 provincias peninsulares e insulares más Ceuta y Melilla.
-
-    Organización territorial:
-    - 50 provincias distribuidas en 17 Comunidades Autónomas
-    - 2 ciudades autónomas: Ceuta y Melilla
-
-    Cada provincia tiene un identificador que puede usarse para filtrar
-    datasets por cobertura geográfica provincial.
-
-    Ejemplos de IDs: Madrid, Barcelona, Sevilla, Valencia, Vizcaya, etc.
-    """
-    try:
-        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.list_provinces(pagination)
-        return _format_response(data)
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.resource("catalog://autonomous-regions")
-async def resource_autonomous_regions() -> str:
-    """
-    Catálogo de las 17 Comunidades Autónomas y 2 Ciudades Autónomas de España.
-
-    Este recurso proporciona información sobre la organización territorial
-    de España a nivel autonómico según la Norma Técnica de Interoperabilidad.
-
-    Comunidades Autónomas:
-    - Andalucía, Aragón, Asturias, Baleares, Canarias
-    - Cantabria, Castilla-La Mancha, Castilla y León
-    - Cataluña, Comunidad Valenciana, Extremadura
-    - Galicia, Madrid, Murcia, Navarra, País Vasco, La Rioja
-
-    Ciudades Autónomas:
-    - Ceuta, Melilla
-
-    Ejemplos de IDs: Comunidad-Madrid, Cataluna, Andalucia, Pais-Vasco
-    """
-    try:
-        pagination = PaginationParams(page=0, page_size=DEFAULT_PAGE_SIZE)
-        data = await client.list_autonomous_regions(pagination)
-        return _format_response(data)
-    except Exception as e:
-        return _handle_error(e)
 
 
 # =============================================================================

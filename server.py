@@ -65,6 +65,53 @@ def _load_embeddings_dependencies() -> bool:
 
 
 # =============================================================================
+# KEYWORD EXTRACTION FOR SEMANTIC SEARCH
+# =============================================================================
+
+# Stopwords español/inglés básicas para filtrar de queries
+STOPWORDS = {
+    # Español
+    "de", "la", "el", "en", "los", "las", "un", "una", "y", "o", "que",
+    "del", "al", "es", "por", "con", "para", "sobre", "como", "su", "sus",
+    "se", "no", "mas", "pero", "este", "esta", "esto", "estos", "estas",
+    "mi", "tu", "nos", "les", "lo", "le", "me", "te", "si", "ya", "muy",
+    "datos", "dataset", "datasets", "informacion", "buscar", "encontrar",
+    "dame", "quiero", "necesito", "muestra", "mostrar", "ver", "todos",
+    # Inglés
+    "the", "a", "an", "of", "in", "on", "for", "to", "and", "or", "with",
+    "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "could", "should", "may", "might",
+    "data", "find", "search", "show", "get", "all", "from", "about",
+}
+
+
+def _extract_keywords(query: str, max_keywords: int = 5) -> list[str]:
+    """Extrae keywords esenciales de una query eliminando stopwords.
+
+    Args:
+        query: Query natural del usuario.
+        max_keywords: Máximo número de keywords a extraer.
+
+    Returns:
+        Lista de keywords filtradas y normalizadas.
+    """
+    # Normalizar: quitar acentos y convertir a minúsculas
+    normalized = normalize_text(query.lower())
+    # Extraer palabras (solo alfanuméricas)
+    words = re.findall(r'\b[a-zA-Z0-9]+\b', normalized)
+    # Filtrar stopwords y palabras muy cortas
+    keywords = [w for w in words if w not in STOPWORDS and len(w) > 2]
+    # Eliminar duplicados manteniendo orden
+    seen = set()
+    unique = []
+    for kw in keywords:
+        if kw not in seen:
+            seen.add(kw)
+            unique.append(kw)
+    return unique[:max_keywords]
+
+
+# =============================================================================
 # MODELS
 # =============================================================================
 
@@ -463,41 +510,28 @@ class DistributionSummary(BaseModel):
 
 
 # =============================================================================
-# EMBEDDING INDEX FOR SEMANTIC SEARCH
+# SEMANTIC RANKER FOR RE-RANKING SEARCH RESULTS
 # =============================================================================
 
 
-class EmbeddingIndex:
-    """Manages dataset embeddings for semantic search.
+class SemanticRanker:
+    """Re-rankea resultados de búsqueda usando similaridad semántica.
 
-    Provides lazy-loaded semantic search capabilities using sentence-transformers.
-    The embedding index is cached to disk for faster subsequent loads.
+    Usa intfloat/multilingual-e5-small para calcular embeddings y similaridad.
+    No requiere índice pre-construido - calcula similaridad on-demand.
 
-    Uses intfloat/multilingual-e5-small which requires:
-    - "query: " prefix for search queries
-    - "passage: " prefix for documents/passages
+    El modelo E5 requiere:
+    - "query: " prefix para queries de búsqueda
+    - "passage: " prefix para documentos/textos
     """
 
     MODEL_NAME = "intfloat/multilingual-e5-small"
-    MODEL_VERSION = "1"  # Increment to invalidate cache on model change
-    CACHE_DIR = Path.home() / ".cache" / "datos-gob-es"
-    CACHE_FILE = CACHE_DIR / "embeddings_e5.pkl"  # New cache file for E5 model
 
     def __init__(self):
         self.model = None
-        self.embeddings = None  # numpy array of shape (n_datasets, embedding_dim)
-        self.dataset_ids: list[str] = []
-        self.dataset_titles: list[str] = []
-        self.dataset_descriptions: list[str] = []
-        self._initialized = False
-
-    def _ensure_cache_dir(self):
-        """Create cache directory if it doesn't exist."""
-        self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     def _load_model(self):
-        """Lazy load the embedding model."""
-        # Lazy load dependencies on first use
+        """Carga lazy del modelo de embeddings."""
         if not _load_embeddings_dependencies():
             raise RuntimeError(
                 "Semantic search requires sentence-transformers and numpy. "
@@ -506,242 +540,66 @@ class EmbeddingIndex:
         if self.model is None:
             self.model = SentenceTransformer(self.MODEL_NAME)
 
-    def _load_cache(self) -> bool:
-        """Load embeddings from cache file if it exists.
-
-        Returns:
-            True if cache was loaded successfully, False otherwise.
-        """
-        if not self.CACHE_FILE.exists():
-            return False
-
-        try:
-            with open(self.CACHE_FILE, "rb") as f:
-                cache_data = pickle.load(f)
-
-            # Check model version - invalidate if different
-            cached_version = cache_data.get("model_version", "0")
-            if cached_version != self.MODEL_VERSION:
-                logger.info("embedding_cache_version_mismatch", cached=cached_version, current=self.MODEL_VERSION)
-                return False
-
-            self.embeddings = cache_data["embeddings"]
-            self.dataset_ids = cache_data["dataset_ids"]
-            self.dataset_titles = cache_data["dataset_titles"]
-            self.dataset_descriptions = cache_data.get("dataset_descriptions", [])
-            self._initialized = True
-            return True
-        except Exception as e:
-            logger.warning("embedding_cache_load_failed", error=str(e))
-            return False
-
-    def _save_cache(self):
-        """Save embeddings to cache file."""
-        self._ensure_cache_dir()
-        cache_data = {
-            "model_version": self.MODEL_VERSION,
-            "model_name": self.MODEL_NAME,
-            "embeddings": self.embeddings,
-            "dataset_ids": self.dataset_ids,
-            "dataset_titles": self.dataset_titles,
-            "dataset_descriptions": self.dataset_descriptions,
-        }
-        with open(self.CACHE_FILE, "wb") as f:
-            pickle.dump(cache_data, f)
-
-    async def build_index(self, client: "DatosGobClient", max_datasets: int = 5000):
-        """Build embedding index from the catalog.
-
-        Args:
-            client: The API client to fetch datasets.
-            max_datasets: Maximum number of datasets to index.
-        """
-        self._load_model()
-
-        # Fetch all datasets
-        all_items: list[dict[str, Any]] = []
-        page = 0
-
-        while len(all_items) < max_datasets:
-            pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-            data = await client.list_datasets(pagination)
-
-            result = data.get("result", {})
-            items = result.get("items", [])
-
-            if not items:
-                break
-
-            all_items.extend(items)
-
-            if len(items) < DEFAULT_PAGE_SIZE:
-                break
-
-            page += 1
-
-        all_items = all_items[:max_datasets]
-
-        # Extract text for each dataset
-        self.dataset_ids = []
-        self.dataset_titles = []
-        self.dataset_descriptions = []
-        texts_to_encode: list[str] = []
-
-        for item in all_items:
-            dataset_id = item.get("_about", "")
-            title = DatasetSummary._extract_text(item.get("title"), "es")
-            description = DatasetSummary._extract_text(item.get("description"), "es")
-
-            # Convert to string
-            title_str = title if isinstance(title, str) else (title[0] if title else "")
-            desc_str = description if isinstance(description, str) else (description[0] if description else "")
-
-            self.dataset_ids.append(dataset_id)
-            self.dataset_titles.append(title_str)
-            self.dataset_descriptions.append(desc_str)
-
-            # Combine title and description for embedding
-            combined_text = f"{title_str}. {desc_str}" if desc_str else title_str
-            # E5 models require "passage: " prefix for documents
-            texts_to_encode.append(f"passage: {combined_text}")
-
-        # Generate embeddings
-        self.embeddings = self.model.encode(texts_to_encode, show_progress_bar=False, normalize_embeddings=True)
-        self._initialized = True
-
-        # Save to cache
-        self._save_cache()
-
-    def search(self, query: str, top_k: int = 20, min_score: float = 0.5) -> list[dict[str, Any]]:
-        """Search for similar datasets using cosine similarity.
-
-        Args:
-            query: The search query.
-            top_k: Maximum number of results to return.
-            min_score: Minimum similarity score (0-1). Default 0.5 filters low-relevance results.
-
-        Returns:
-            List of dicts with dataset_id, title, description, and score.
-        """
-        if not self._initialized:
-            raise RuntimeError("Index not initialized. Call build_index() first.")
-
-        self._load_model()
-
-        # Encode query with E5 prefix
-        query_embedding = self.model.encode(f"query: {query}", normalize_embeddings=True)
-
-        # Calculate cosine similarity (embeddings already normalized)
-        similarities = np.dot(self.embeddings, query_embedding)
-
-        # Get top-k indices
-        top_indices = np.argsort(similarities)[::-1][:top_k]
-
-        results = []
-        for idx in top_indices:
-            score = float(similarities[idx])
-            if score < min_score:
-                break
-            results.append({
-                "uri": self.dataset_ids[idx],  # Use uri for consistency
-                "dataset_id": self.dataset_ids[idx].split("/")[-1] if "/" in self.dataset_ids[idx] else self.dataset_ids[idx],
-                "title": self.dataset_titles[idx],
-                "description": self.dataset_descriptions[idx][:200] + "..." if len(self.dataset_descriptions[idx]) > 200 else self.dataset_descriptions[idx],
-                "score": round(score, 4),
-            })
-
-        return results
-
     def compute_similarity(self, query: str, text: str) -> float:
-        """Compute cosine similarity between a query and a text.
+        """Calcula similaridad coseno entre una query y un texto.
 
         Args:
-            query: The search query.
-            text: The text to compare against.
+            query: Query de búsqueda.
+            text: Texto a comparar.
 
         Returns:
-            Cosine similarity score (0-1).
+            Score de similaridad (0-1).
         """
         self._load_model()
 
-        # Encode both with E5 prefixes (normalized)
+        # Encode con prefijos E5 (normalizados)
         query_embedding = self.model.encode(f"query: {query}", normalize_embeddings=True)
         text_embedding = self.model.encode(f"passage: {text}", normalize_embeddings=True)
 
-        # Cosine similarity (already normalized)
+        # Similaridad coseno (ya normalizados)
         similarity = float(np.dot(query_embedding, text_embedding))
-        return max(0.0, similarity)  # Ensure non-negative
+        return max(0.0, similarity)
 
-    def clear_cache(self):
-        """Delete the cache file."""
-        if self.CACHE_FILE.exists():
-            self.CACHE_FILE.unlink()
-        self._initialized = False
-        self.embeddings = None
-        self.dataset_ids = []
-        self.dataset_titles = []
-        self.dataset_descriptions = []
-
-    def find_similar(self, dataset_id: str, top_k: int = 10, min_score: float = 0.5) -> list[dict[str, Any]]:
-        """Find datasets similar to a given dataset.
+    def rank_results(
+        self,
+        query: str,
+        datasets: list[dict[str, Any]],
+        min_score: float = 0.5,
+        top_k: int = 20
+    ) -> list[dict[str, Any]]:
+        """Re-rankea datasets por similaridad semántica con la query.
 
         Args:
-            dataset_id: URI or ID of the reference dataset.
-            top_k: Maximum number of results.
-            min_score: Minimum similarity score.
+            query: Query original del usuario.
+            datasets: Lista de datasets a re-rankear.
+            min_score: Score mínimo para incluir en resultados (default 0.5).
+            top_k: Máximo número de resultados a devolver.
 
         Returns:
-            List of similar datasets with scores.
+            Lista de datasets ordenados por semantic_score descendente.
         """
-        if not self._initialized:
-            raise RuntimeError("Index not initialized.")
+        if not datasets:
+            return []
 
-        # Lazy load dependencies
-        if not _load_embeddings_dependencies():
-            raise RuntimeError("Embeddings not available")
+        self._load_model()
 
-        # Find the dataset in our index
-        target_idx = None
-        for i, ds_id in enumerate(self.dataset_ids):
-            if dataset_id in ds_id or ds_id.endswith(dataset_id):
-                target_idx = i
-                break
+        ranked = []
+        for ds in datasets:
+            # Construir texto para comparación
+            title = ds.get("title", "")
+            description = ds.get("description", "")
+            keywords = " ".join(ds.get("keywords", []) or [])
+            text = f"{title} {description} {keywords}".strip()
 
-        if target_idx is None:
-            raise ValueError(f"Dataset {dataset_id} not found in index")
+            if text:
+                score = self.compute_similarity(query, text)
+                if score >= min_score:
+                    ds["semantic_score"] = round(score, 4)
+                    ranked.append(ds)
 
-        # Get embedding for target dataset
-        target_embedding = self.embeddings[target_idx]
-
-        # Calculate similarities with all other datasets
-        target_norm = target_embedding / np.linalg.norm(target_embedding)
-        embeddings_norm = self.embeddings / np.linalg.norm(self.embeddings, axis=1, keepdims=True)
-        similarities = np.dot(embeddings_norm, target_norm)
-
-        # Get top-k indices (excluding the target itself)
-        top_indices = np.argsort(similarities)[::-1]
-
-        results = []
-        for idx in top_indices:
-            if idx == target_idx:
-                continue
-            score = float(similarities[idx])
-            if score < min_score:
-                break
-            if len(results) >= top_k:
-                break
-            ds_uri = self.dataset_ids[idx]
-            results.append({
-                "uri": ds_uri,
-                "dataset_id": ds_uri.split("/")[-1] if "/" in ds_uri else ds_uri,
-                "title": self.dataset_titles[idx],
-                "description": self.dataset_descriptions[idx][:200] + "..."
-                              if len(self.dataset_descriptions[idx]) > 200
-                              else self.dataset_descriptions[idx],
-                "similarity_score": round(score, 4),
-            })
-
-        return results
+        # Ordenar por score descendente
+        ranked.sort(key=lambda x: x.get("semantic_score", 0), reverse=True)
+        return ranked[:top_k]
 
 
 # =============================================================================
@@ -980,8 +838,8 @@ class MetadataCache:
         return self.spatial_coverage
 
 
-# Global embedding index instance
-embedding_index = EmbeddingIndex()
+# Global semantic ranker instance
+semantic_ranker = SemanticRanker()
 
 # Global metadata cache instance
 metadata_cache = MetadataCache()
@@ -2471,6 +2329,7 @@ async def get_dataset(dataset_id: str, lang: str | None = "es") -> str:
 
 
 async def _search_datasets_impl(
+    query: str | None = None,
     title: str | None = None,
     publisher: str | None = None,
     theme: str | None = None,
@@ -2487,54 +2346,49 @@ async def _search_datasets_impl(
     max_results: int = 100,
     include_preview: bool = False,
     preview_rows: int = 10,
-    semantic_query: str | None = None,
-    semantic_top_k: int = 50,
     semantic_min_score: float = 0.5,
     license: str | None = None,
     frequency: str | None = None,
 ) -> str:
     """Internal implementation of search_datasets.
 
-    Supports three search modes:
-    1. Filter-based: Use title, keyword, theme, publisher, etc.
-    2. Semantic: Use semantic_query for AI-powered natural language search.
-    3. Hybrid: Combine semantic_query with filters for best results.
+    Supports two search modes:
+    1. Query-based: Natural language query → extract keywords → search API → semantic re-ranking.
+    2. Filter-based: Use title, keyword, theme, publisher, etc. for direct API filtering.
 
     Response includes enriched metadata: id, publisher_name, frequency, language,
-    spatial, license, formats, and access_url. By default, includes a data preview
-    (first 10 rows) for datasets with CSV/JSON/TSV formats.
+    spatial, license, formats, and access_url.
 
     Args:
-        title: Search text in dataset titles.
-        publisher: Publisher ID (e.g., 'EA0010587' for INE). Use list_publishers to find IDs.
-        theme: Theme ID (e.g., 'economia', 'salud', 'educacion'). Use list_themes to find IDs.
+        query: Natural language query (e.g., "accidentes de tráfico en Madrid"). Extracts keywords, searches API, then re-ranks by semantic similarity.
+        title: Search text in dataset titles (direct API search, no semantic re-ranking).
+        publisher: Publisher ID (e.g., 'EA0010587' for INE). Use list_metadata('publishers') to find IDs.
+        theme: Theme ID (e.g., 'economia', 'salud', 'educacion'). Use list_metadata('themes') to find IDs.
         themes: List of theme IDs for multi-theme search (OR logic). Example: ['economia', 'hacienda'].
         format: Format ID (e.g., 'csv', 'json', 'xml').
         keyword: Keyword/tag to filter by (e.g., 'presupuesto', 'poblacion').
         date_start: Start date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-01-01T00:00Z').
         date_end: End date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-12-31T23:59Z').
-        exact_match: If True with title, match whole words only (e.g., 'DANA' won't match 'ciudadana').
+        exact_match: If True with title, match whole words only.
         page: Page number (starting from 0). Ignored if fetch_all=True.
-        sort: Sort field. Use '-' prefix for descending. Examples: '-modified' (newest first), 'title', '-issued'.
-        lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'. Use None for all.
+        sort: Sort field. Use '-' prefix for descending. Examples: '-modified', 'title'.
+        lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'.
         fetch_all: If True, fetches all pages automatically up to max_results.
-        max_results: Maximum results when fetch_all=True (default 100, max 100).
-        include_preview: Include data preview (first rows) for CSV/JSON/TSV datasets. Default False for faster responses.
-        preview_rows: Number of preview rows (default 10, max 50). Only used if include_preview=True.
-        semantic_query: Natural language query for AI-powered semantic search (e.g., "unemployment data in coastal cities"). First use may take 30-60s to build index.
-        semantic_top_k: Max results for semantic search (default 50, max 100).
-        semantic_min_score: Min similarity score 0-1 for semantic search (default 0.5). Lower = more results but less relevant.
-        license: Filter by license type (e.g., 'CC_BY', 'CC0', 'public-domain'). Partial match supported.
-        frequency: Filter by update frequency. Values: 'P1D' (daily), 'P1W' (weekly), 'P1M' (monthly), 'P1Y' (yearly).
+        max_results: Maximum results (default 100, max 100).
+        include_preview: Include data preview for CSV/JSON/TSV datasets. Default False.
+        preview_rows: Number of preview rows (default 10, max 50).
+        semantic_min_score: Min similarity score 0-1 for query results (default 0.5).
+        license: Filter by license type (e.g., 'CC_BY', 'CC0').
+        frequency: Filter by update frequency ('P1D', 'P1W', 'P1M', 'P1Y').
 
     Returns:
-        JSON with matching datasets including metadata and data preview.
+        JSON with matching datasets including metadata.
     """
     # Record usage metrics
     usage_metrics.record_tool_call("search_datasets")
     usage_metrics.record_search({
         "title": title, "publisher": publisher, "theme": theme, "themes": themes,
-        "format": format, "keyword": keyword, "semantic_query": semantic_query,
+        "format": format, "keyword": keyword, "query": query,
     })
 
     try:
@@ -2543,130 +2397,130 @@ async def _search_datasets_impl(
         date_end = _validate_date(date_end, "date_end")
 
         max_results = min(max_results, 100)  # Safety limit
-        semantic_top_k = min(semantic_top_k, 100)  # Safety limit
         pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
         data: dict[str, Any] | None = None
         local_filters: dict[str, Any] = {}
 
-        # Check if any traditional filters are provided
-        has_filters = any([title, publisher, theme, themes, format, keyword, date_start])
+        # =================================================================
+        # QUERY-BASED SEARCH (keywords + semantic re-ranking)
+        # =================================================================
+        if query:
+            # Step 1: Extract keywords from natural language query
+            keywords = _extract_keywords(query)
 
-        # =================================================================
-        # SEMANTIC SEARCH MODE (pure or hybrid)
-        # =================================================================
-        if semantic_query:
-            # Lazy load embeddings dependencies
-            if not _load_embeddings_dependencies():
+            if not keywords:
                 return json.dumps({
-                    "error": "Semantic search not available. Install: pip install sentence-transformers numpy",
-                    "suggestion": "Remove semantic_query parameter to use filter-based search."
+                    "error": "No se pudieron extraer keywords de la query",
+                    "query": query,
+                    "suggestion": "Usa términos más específicos o usa el parámetro 'title' para búsqueda directa."
                 }, ensure_ascii=False)
 
-            # Initialize embedding index if needed
-            if not embedding_index._initialized:
-                cache_loaded = embedding_index._load_cache()
-                if not cache_loaded:
-                    await embedding_index.build_index(client, max_datasets=5000)
+            # =============================================================
+            # STEP 1: KEYWORD SEARCH - Búsqueda amplia por keywords
+            # =============================================================
+            # Buscamos con hasta 5 keywords y múltiples páginas para obtener
+            # un pool amplio de candidatos que luego filtraremos semánticamente
+            all_items: list[dict[str, Any]] = []
+            max_pages_per_keyword = 3  # Más páginas para obtener más resultados
 
-            if has_filters:
-                # HYBRID MODE: Filter first, then rank by semantic similarity
-                # First, perform traditional search to get filtered results
-                # Use _search_datasets_impl to avoid FunctionTool recursion issues
-                filtered_response = await _search_datasets_impl(
-                    title=title,
-                    publisher=publisher,
-                    theme=theme,
-                    format=format,
-                    keyword=keyword,
-                    date_start=date_start,
-                    date_end=date_end,
-                    exact_match=exact_match,
-                    page=0,
-                    lang=lang,
-                    fetch_all=True,
-                    max_results=max_results,
-                    include_preview=False,  # Don't fetch previews yet
-                    preview_rows=preview_rows,
-                    semantic_query=None,  # Disable semantic for this call
+            for kw in keywords[:5]:  # Usar hasta 5 keywords
+                try:
+                    for page_num in range(max_pages_per_keyword):
+                        kw_pagination = PaginationParams(page=page_num, page_size=DEFAULT_PAGE_SIZE, sort=sort)
+                        kw_data = await client.get_datasets_by_keyword(kw, kw_pagination)
+                        items = kw_data.get("result", {}).get("items", [])
+                        if not items:
+                            break  # No más resultados para este keyword
+                        all_items.extend(items)
+                except Exception as e:
+                    logger.warning("keyword_search_failed", keyword=kw, error=str(e))
+
+            # Deduplicar resultados por URI
+            seen_uris: set[str] = set()
+            unique_items: list[dict[str, Any]] = []
+            for item in all_items:
+                uri = item.get("_about")
+                if uri and uri not in seen_uris:
+                    seen_uris.add(uri)
+                    unique_items.append(item)
+
+            # Aplicar filtros tradicionales si se proporcionaron
+            if any([publisher, theme, themes, format, date_start]):
+                unique_items = _filter_datasets_locally(
+                    unique_items, publisher, theme, themes, format, keyword=None,
+                    license_filter=license, frequency_filter=frequency
                 )
 
-                filtered_data = json.loads(filtered_response)
-                filtered_datasets = filtered_data.get("datasets", [])
+            total_from_keyword_search = len(unique_items)
 
-                if not filtered_datasets:
-                    return json.dumps({
-                        "search_mode": "hybrid",
-                        "semantic_query": semantic_query,
-                        "filters_applied": _build_filters_dict(
-                            title=title, publisher=publisher, theme=theme,
-                            format=format, keyword=keyword
-                        ),
-                        "total_results": 0,
-                        "datasets": [],
-                    }, ensure_ascii=False, indent=2)
+            if not unique_items:
+                return json.dumps({
+                    "search_mode": "query",
+                    "query": query,
+                    "keywords_extracted": keywords[:5],
+                    "total_from_keyword_search": 0,
+                    "total_results": 0,
+                    "datasets": [],
+                }, ensure_ascii=False, indent=2)
 
-                # Rank filtered results by semantic similarity
-                ranked_results = []
-                for ds in filtered_datasets:
-                    # Build text for embedding comparison
-                    ds_title = ds.get("title", "")
-                    ds_desc = ds.get("description", "")
-                    ds_keywords = " ".join(ds.get("keywords", []) or [])
-                    text = f"{ds_title} {ds_desc} {ds_keywords}".strip()
+            # Construir summaries para el pool de candidatos (máx 500)
+            max_candidates = 500
+            datasets = []
+            for item in unique_items[:max_candidates]:
+                summary = DatasetSummary.from_api_item(item, lang)
+                datasets.append(summary.model_dump(exclude_none=True))
 
-                    if text:
-                        score = embedding_index.compute_similarity(semantic_query, text)
-                        if score >= semantic_min_score:
-                            ds["semantic_score"] = round(score, 4)
-                            ranked_results.append(ds)
+            # =============================================================
+            # STEP 2: SEMANTIC FILTER - Filtrar por similaridad semántica
+            # =============================================================
+            if not _load_embeddings_dependencies():
+                # Fallback: devolver resultados sin filtro semántico
+                datasets = datasets[:max_results]
+                return json.dumps({
+                    "search_mode": "query (keywords only - no semantic filter)",
+                    "query": query,
+                    "keywords_extracted": keywords[:5],
+                    "step1_keyword_search": {
+                        "total_raw_results": len(all_items),
+                        "total_after_dedup": total_from_keyword_search,
+                    },
+                    "total_results": len(datasets),
+                    "note": "Semantic filter not available (install sentence-transformers)",
+                    "datasets": datasets,
+                }, ensure_ascii=False, indent=2)
 
-                # Sort by semantic score descending
-                ranked_results.sort(key=lambda x: x.get("semantic_score", 0), reverse=True)
-                ranked_results = ranked_results[:semantic_top_k]
+            # Aplicar filtro semántico: solo mantener resultados con score >= min_score
+            ranked = semantic_ranker.rank_results(
+                query, datasets,
+                min_score=semantic_min_score,
+                top_k=max_results
+            )
 
-                # Add previews if requested
-                if include_preview and ranked_results:
-                    await _add_previews_to_dataset_list(ranked_results, preview_rows)
+            # Añadir previews si se solicitaron
+            if include_preview and ranked:
+                await _add_previews_to_dataset_list(ranked, preview_rows)
 
-                output = {
-                    "search_mode": "hybrid",
-                    "semantic_query": semantic_query,
-                    "filters_applied": _build_filters_dict(
-                        title=title, publisher=publisher, theme=theme,
-                        format=format, keyword=keyword
-                    ),
-                    "total_filtered": len(filtered_datasets),
-                    "total_results": len(ranked_results),
-                    "semantic_min_score": semantic_min_score,
-                    "datasets": ranked_results,
-                }
-                return json.dumps(output, ensure_ascii=False, indent=2)
-
-            else:
-                # PURE SEMANTIC MODE: Only semantic search, no filters
-                results = embedding_index.search(
-                    semantic_query,
-                    top_k=semantic_top_k,
-                    min_score=semantic_min_score
-                )
-
-                # Add previews if requested (need to fetch distributions for semantic results)
-                if include_preview and results:
-                    await _add_previews_to_dataset_list(results, preview_rows, fetch_distributions=True)
-
-                output = {
-                    "search_mode": "semantic",
-                    "semantic_query": semantic_query,
-                    "total_results": len(results),
-                    "semantic_min_score": semantic_min_score,
-                    "datasets": results,
-                }
-                return json.dumps(output, ensure_ascii=False, indent=2)
+            return json.dumps({
+                "search_mode": "query (keyword search + semantic filter)",
+                "query": query,
+                "keywords_extracted": keywords[:5],
+                "step1_keyword_search": {
+                    "total_raw_results": len(all_items),
+                    "total_after_dedup": total_from_keyword_search,
+                    "candidates_for_semantic": len(datasets),
+                },
+                "step2_semantic_filter": {
+                    "min_score": semantic_min_score,
+                    "results_passing_filter": len(ranked),
+                },
+                "total_results": len(ranked),
+                "datasets": ranked,
+            }, ensure_ascii=False, indent=2)
 
         # =================================================================
-        # FILTER-BASED SEARCH MODE (traditional)
+        # FILTER-BASED SEARCH MODE (traditional, no semantic re-ranking)
         # =================================================================
-        # Priority order for API query: title > date > spatial > publisher > theme > format > keyword
+        # Priority order for API query: title > date > publisher > theme > format > keyword
         if title:
             if exact_match:
                 # Search multiple pages to find exact matches
@@ -2833,6 +2687,7 @@ async def _search_datasets_impl(
 
 @mcp.tool()
 async def search_datasets(
+    query: str | None = None,
     title: str | None = None,
     publisher: str | None = None,
     theme: str | None = None,
@@ -2849,50 +2704,44 @@ async def search_datasets(
     max_results: int = 100,
     include_preview: bool = False,
     preview_rows: int = 10,
-    semantic_query: str | None = None,
-    semantic_top_k: int = 50,
     semantic_min_score: float = 0.5,
     license: str | None = None,
     frequency: str | None = None,
 ) -> str:
-    """Search and filter datasets from the Spanish open data catalog.
+    """Search datasets from the Spanish open data catalog (datos.gob.es).
 
-    Supports three search modes:
-    1. Filter-based: Use title, keyword, theme, publisher, etc.
-    2. Semantic: Use semantic_query for AI-powered natural language search.
-    3. Hybrid: Combine semantic_query with filters for best results.
-
-    Response includes enriched metadata: id, publisher_name, frequency, language,
-    spatial, license, formats, and access_url. By default, includes a data preview
-    (first 10 rows) for datasets with CSV/JSON/TSV formats.
+    Two search modes:
+    1. Query-based: Natural language query → extracts keywords → searches API → re-ranks by semantic similarity.
+    2. Filter-based: Direct API filtering by title, publisher, theme, etc.
 
     Args:
-        title: Search text in dataset titles.
+        query: Natural language query (e.g., "accidentes de tráfico en Madrid").
+               Extracts keywords, searches API, then re-ranks results by semantic similarity.
+        title: Search text in dataset titles (direct API search, no semantic re-ranking).
         publisher: Publisher ID (e.g., 'EA0010587' for INE). Use list_metadata('publishers') to find IDs.
-        theme: Theme ID (e.g., 'economia', 'salud', 'educacion'). Use list_metadata('themes') to find IDs.
-        themes: List of theme IDs for multi-theme search (OR logic). Example: ['economia', 'hacienda'].
+        theme: Theme ID (e.g., 'economia', 'salud'). Use list_metadata('themes') to find IDs.
+        themes: List of theme IDs for multi-theme search (OR logic).
         format: Format ID (e.g., 'csv', 'json', 'xml').
-        keyword: Keyword/tag to filter by (e.g., 'presupuesto', 'poblacion').
-        date_start: Start date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-01-01T00:00Z').
-        date_end: End date 'YYYY-MM-DDTHH:mmZ' (e.g., '2024-12-31T23:59Z').
+        keyword: Keyword/tag to filter by (e.g., 'presupuesto').
+        date_start: Start date 'YYYY-MM-DDTHH:mmZ'.
+        date_end: End date 'YYYY-MM-DDTHH:mmZ'.
         exact_match: If True with title, match whole words only.
-        page: Page number (starting from 0). Ignored if fetch_all=True.
-        sort: Sort field. Use '-' prefix for descending. Examples: '-modified', 'title'.
+        page: Page number (starting from 0).
+        sort: Sort field. Use '-' prefix for descending (e.g., '-modified').
         lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'.
-        fetch_all: If True, fetches all pages automatically up to max_results.
-        max_results: Maximum results when fetch_all=True (default 100, max 100).
-        include_preview: Include data preview for CSV/JSON/TSV datasets. Default False for faster responses.
+        fetch_all: If True, fetches all pages up to max_results.
+        max_results: Maximum results (default 100, max 100).
+        include_preview: Include data preview for CSV/JSON datasets. Default False.
         preview_rows: Number of preview rows (default 10, max 50).
-        semantic_query: Natural language query for AI-powered semantic search.
-        semantic_top_k: Max results for semantic search (default 50, max 100).
-        semantic_min_score: Min similarity score 0-1 for semantic search (default 0.5). Lower = more results but less relevant.
-        license: Filter by license type (e.g., 'CC_BY', 'CC0', 'public-domain').
+        semantic_min_score: Min similarity score 0-1 for query results (default 0.5).
+        license: Filter by license type (e.g., 'CC_BY', 'CC0').
         frequency: Filter by update frequency ('P1D', 'P1W', 'P1M', 'P1Y').
 
     Returns:
-        JSON with matching datasets including metadata and data preview.
+        JSON with matching datasets and metadata.
     """
     return await _search_datasets_impl(
+        query=query,
         title=title,
         publisher=publisher,
         theme=theme,
@@ -2909,70 +2758,10 @@ async def search_datasets(
         max_results=max_results,
         include_preview=include_preview,
         preview_rows=preview_rows,
-        semantic_query=semantic_query,
-        semantic_top_k=semantic_top_k,
         semantic_min_score=semantic_min_score,
         license=license,
         frequency=frequency,
     )
-
-
-@mcp.tool()
-async def get_related_datasets(
-    dataset_id: str,
-    top_k: int = 10,
-    min_score: float = 0.5,
-    include_preview: bool = False,
-    preview_rows: int = 5,
-) -> str:
-    """Find datasets similar to a given dataset using AI semantic matching.
-
-    Uses embeddings to find semantically related datasets based on
-    title and description similarity. Useful for discovering related data sources.
-
-    Args:
-        dataset_id: The reference dataset ID (from URI or search results).
-        top_k: Maximum number of similar datasets to return (default 10, max 50).
-        min_score: Minimum similarity score 0-1 (default 0.5). Higher = more similar.
-        include_preview: Include data preview for results. Default False.
-        preview_rows: Number of preview rows if include_preview=True.
-
-    Returns:
-        JSON with similar datasets ranked by similarity score.
-    """
-    usage_metrics.record_tool_call("get_related_datasets")
-    usage_metrics.record_dataset_access(dataset_id)
-
-    top_k = min(top_k, 50)
-
-    try:
-        # Ensure embedding index is initialized
-        if not _load_embeddings_dependencies():
-            return json.dumps({
-                "error": "Semantic search not available. Install: pip install sentence-transformers numpy"
-            }, ensure_ascii=False)
-
-        if not embedding_index._initialized:
-            cache_loaded = embedding_index._load_cache()
-            if not cache_loaded:
-                await embedding_index.build_index(client, max_datasets=5000)
-
-        results = embedding_index.find_similar(dataset_id, top_k, min_score)
-
-        if include_preview and results:
-            await _add_previews_to_dataset_list(results, preview_rows, fetch_distributions=True)
-
-        return json.dumps({
-            "reference_dataset": dataset_id,
-            "total_similar": len(results),
-            "min_score": min_score,
-            "datasets": results,
-        }, ensure_ascii=False, indent=2)
-
-    except ValueError as e:
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"error": f"Failed to find similar datasets: {e}"}, ensure_ascii=False)
 
 
 @mcp.tool()

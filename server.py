@@ -1509,6 +1509,68 @@ async def _search_by_keywords_combined(
     return all_items
 
 
+async def _search_query_candidates(
+    keywords: list[str],
+    max_pages_per_source: int = 2,
+    sort: str | None = None,
+) -> list[dict[str, Any]]:
+    """Busca candidatos usando keyword + title search en paralelo.
+
+    Para cada keyword, busca en:
+    - endpoint keyword (tags del dataset)
+    - endpoint title (títulos del dataset)
+
+    Ejecuta todas las búsquedas en paralelo con asyncio.gather y deduplica.
+
+    Args:
+        keywords: Lista de keywords extraídos de la query.
+        max_pages_per_source: Máximo de páginas por endpoint (default 2).
+        sort: Campo de ordenación.
+
+    Returns:
+        Lista de datasets únicos (deduplicados por URI).
+    """
+    seen_uris: set[str] = set()
+    all_items: list[dict[str, Any]] = []
+
+    async def fetch_pages(search_fn: Any, term: str) -> list[dict[str, Any]]:
+        """Fetch múltiples páginas de un endpoint."""
+        items: list[dict[str, Any]] = []
+        for page in range(max_pages_per_source):
+            pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
+            try:
+                data = await search_fn(term, pagination)
+                page_items = data.get("result", {}).get("items", [])
+                if not page_items:
+                    break
+                items.extend(page_items)
+            except Exception as e:
+                logger.warning("search_page_failed", term=term, page=page, error=str(e))
+                break
+        return items
+
+    # Crear tareas para keyword y title search por cada keyword
+    tasks = []
+    for kw in keywords:
+        kw_normalized = normalize_text(kw)
+        tasks.append(fetch_pages(client.get_datasets_by_keyword, kw_normalized))
+        tasks.append(fetch_pages(client.search_datasets_by_title, kw_normalized))
+
+    # Ejecutar todas las búsquedas en paralelo
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Deduplicar resultados por URI
+    for result in results:
+        if isinstance(result, list):
+            for item in result:
+                uri = item.get("_about")
+                if uri and uri not in seen_uris:
+                    seen_uris.add(uri)
+                    all_items.append(item)
+
+    return all_items
+
+
 def _normalize_preview_rows(preview_rows: int) -> int:
     """Normalize preview_rows to be within valid bounds (1-50)."""
     return min(max(1, preview_rows), 50)
@@ -2416,49 +2478,36 @@ async def _search_datasets_impl(
                 }, ensure_ascii=False)
 
             # =============================================================
-            # STEP 1: KEYWORD SEARCH - Búsqueda amplia por keywords
+            # STEP 1: KEYWORD + TITLE SEARCH - Búsqueda amplia en paralelo
             # =============================================================
-            # Buscamos con hasta 5 keywords y múltiples páginas para obtener
-            # un pool amplio de candidatos que luego filtraremos semánticamente
-            all_items: list[dict[str, Any]] = []
-            max_pages_per_keyword = 3  # Más páginas para obtener más resultados
-
-            for kw in keywords[:5]:  # Usar hasta 5 keywords
-                try:
-                    for page_num in range(max_pages_per_keyword):
-                        kw_pagination = PaginationParams(page=page_num, page_size=DEFAULT_PAGE_SIZE, sort=sort)
-                        kw_data = await client.get_datasets_by_keyword(kw, kw_pagination)
-                        items = kw_data.get("result", {}).get("items", [])
-                        if not items:
-                            break  # No más resultados para este keyword
-                        all_items.extend(items)
-                except Exception as e:
-                    logger.warning("keyword_search_failed", keyword=kw, error=str(e))
-
-            # Deduplicar resultados por URI
-            seen_uris: set[str] = set()
-            unique_items: list[dict[str, Any]] = []
-            for item in all_items:
-                uri = item.get("_about")
-                if uri and uri not in seen_uris:
-                    seen_uris.add(uri)
-                    unique_items.append(item)
+            # Buscamos en endpoints keyword y title para cada keyword extraído
+            # Ejecuta todas las búsquedas en paralelo y deduplica resultados
+            keywords_to_search = keywords[:5]
+            all_items = await _search_query_candidates(
+                keywords=keywords_to_search,
+                max_pages_per_source=2,
+                sort=sort,
+            )
 
             # Aplicar filtros tradicionales si se proporcionaron
+            unique_items = all_items
             if any([publisher, theme, themes, format, date_start]):
                 unique_items = _filter_datasets_locally(
                     unique_items, publisher, theme, themes, format, keyword=None,
                     license_filter=license, frequency_filter=frequency
                 )
 
-            total_from_keyword_search = len(unique_items)
+            total_from_search = len(unique_items)
 
             if not unique_items:
                 return json.dumps({
-                    "search_mode": "query",
+                    "search_mode": "query (keyword + title search)",
                     "query": query,
-                    "keywords_extracted": keywords[:5],
-                    "total_from_keyword_search": 0,
+                    "keywords_extracted": keywords_to_search,
+                    "step1_search": {
+                        "sources": ["keyword", "title"],
+                        "total_results": 0,
+                    },
                     "total_results": 0,
                     "datasets": [],
                 }, ensure_ascii=False, indent=2)
@@ -2477,12 +2526,13 @@ async def _search_datasets_impl(
                 # Fallback: devolver resultados sin filtro semántico
                 datasets = datasets[:max_results]
                 return json.dumps({
-                    "search_mode": "query (keywords only - no semantic filter)",
+                    "search_mode": "query (keyword + title search, no semantic filter)",
                     "query": query,
-                    "keywords_extracted": keywords[:5],
-                    "step1_keyword_search": {
+                    "keywords_extracted": keywords_to_search,
+                    "step1_search": {
+                        "sources": ["keyword", "title"],
                         "total_raw_results": len(all_items),
-                        "total_after_dedup": total_from_keyword_search,
+                        "total_after_filters": total_from_search,
                     },
                     "total_results": len(datasets),
                     "note": "Semantic filter not available (install sentence-transformers)",
@@ -2501,12 +2551,13 @@ async def _search_datasets_impl(
                 await _add_previews_to_dataset_list(ranked, preview_rows)
 
             return json.dumps({
-                "search_mode": "query (keyword search + semantic filter)",
+                "search_mode": "query (keyword + title search + semantic filter)",
                 "query": query,
-                "keywords_extracted": keywords[:5],
-                "step1_keyword_search": {
+                "keywords_extracted": keywords_to_search,
+                "step1_search": {
+                    "sources": ["keyword", "title"],
                     "total_raw_results": len(all_items),
-                    "total_after_dedup": total_from_keyword_search,
+                    "total_after_filters": total_from_search,
                     "candidates_for_semantic": len(datasets),
                 },
                 "step2_semantic_filter": {

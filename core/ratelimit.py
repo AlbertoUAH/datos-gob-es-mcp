@@ -6,6 +6,7 @@ from typing import ClassVar
 
 from aiolimiter import AsyncLimiter
 
+from .config import RATE_LIMIT_TIMEOUT
 from .logging import get_logger
 
 logger = get_logger("ratelimit")
@@ -85,7 +86,7 @@ class RateLimiter:
         return cls._limiters[api_name]
 
     @classmethod
-    async def acquire(cls, api_name: str, timeout: float = 30.0) -> None:
+    async def acquire(cls, api_name: str, timeout: float = RATE_LIMIT_TIMEOUT) -> None:
         """Acquire a rate limit token for the specified API.
 
         This method will wait if the rate limit has been reached.

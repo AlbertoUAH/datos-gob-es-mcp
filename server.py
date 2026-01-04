@@ -30,8 +30,41 @@ import httpx
 from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
-# Core utilities for logging and rate limiting
-from core import setup_logging, get_logger, HTTPClient
+# Core utilities for logging, rate limiting, and configuration
+from core import (
+    setup_logging,
+    get_logger,
+    HTTPClient,
+    BaseAPIClient,
+    DatosGobClientError,
+    handle_api_error,
+    normalize_format,
+    # Configuration
+    DATOS_GOB_BASE_URL,
+    HTTP_DEFAULT_TIMEOUT,
+    DEFAULT_PAGE_SIZE,
+    MAX_SEARCH_RESULTS,
+    PREVIEW_TIMEOUT,
+    DOWNLOAD_TIMEOUT,
+    PREVIEW_MAX_BYTES,
+    DOWNLOAD_MAX_BYTES,
+    MAX_DOWNLOAD_MB,
+    SEMANTIC_MODEL_NAME,
+    SEMANTIC_MIN_SCORE,
+    SEMANTIC_TOP_K,
+    MAX_SEMANTIC_CANDIDATES,
+    DESCRIPTION_MAX_LENGTH,
+    MAX_KEYWORDS,
+    PARALLEL_PAGES,
+    MAX_STATS_ROWS,
+    CACHE_TTL_HOURS,
+    CACHE_DIR,
+    DEFAULT_PREVIEW_ROWS,
+    MAX_PREVIEW_ROWS,
+    # Performance
+    EMBEDDINGS_BATCH_SIZE,
+    PRELOAD_EMBEDDINGS_MODEL,
+)
 
 # Initialize structured logging
 setup_logging()
@@ -85,7 +118,7 @@ STOPWORDS = {
 }
 
 
-def _extract_keywords(query: str, max_keywords: int = 5) -> list[str]:
+def _extract_keywords(query: str, max_keywords: int = MAX_KEYWORDS) -> list[str]:
     """Extrae keywords esenciales de una query eliminando stopwords.
 
     Args:
@@ -159,8 +192,8 @@ class DatasetSummary(BaseModel):
         title = cls._extract_text(item.get("title"), lang)
         description = cls._extract_text(item.get("description"), lang)
         # Truncate long descriptions to reduce payload size
-        if description and isinstance(description, str) and len(description) > 200:
-            description = description[:197] + "..."
+        if description and isinstance(description, str) and len(description) > DESCRIPTION_MAX_LENGTH:
+            description = description[:DESCRIPTION_MAX_LENGTH - 3] + "..."
 
         distributions = item.get("distribution", [])
         if isinstance(distributions, dict):
@@ -525,7 +558,7 @@ class SemanticRanker:
     - "passage: " prefix para documentos/textos
     """
 
-    MODEL_NAME = "intfloat/multilingual-e5-small"
+    MODEL_NAME = SEMANTIC_MODEL_NAME
 
     def __init__(self):
         self.model = None
@@ -564,10 +597,12 @@ class SemanticRanker:
         self,
         query: str,
         datasets: list[dict[str, Any]],
-        min_score: float = 0.5,
-        top_k: int = 20
+        min_score: float = SEMANTIC_MIN_SCORE,
+        top_k: int = SEMANTIC_TOP_K
     ) -> list[dict[str, Any]]:
         """Re-rankea datasets por similaridad semántica con la query.
+
+        Uses batch encoding for much better performance compared to one-by-one.
 
         Args:
             query: Query original del usuario.
@@ -583,21 +618,45 @@ class SemanticRanker:
 
         self._load_model()
 
-        ranked = []
+        # Build texts for batch encoding
+        texts = []
         for ds in datasets:
-            # Construir texto para comparación
             title = ds.get("title", "")
             description = ds.get("description", "")
             keywords = " ".join(ds.get("keywords", []) or [])
-            text = f"{title} {description} {keywords}".strip()
+            texts.append(f"{title} {description} {keywords}".strip())
 
-            if text:
-                score = self.compute_similarity(query, text)
-                if score >= min_score:
-                    ds["semantic_score"] = round(score, 4)
-                    ranked.append(ds)
+        # Filter out empty texts and keep track of indices
+        valid_indices = [i for i, t in enumerate(texts) if t]
+        valid_texts = [texts[i] for i in valid_indices]
 
-        # Ordenar por score descendente
+        if not valid_texts:
+            return []
+
+        # Batch encode - MUCH faster than loop
+        query_embedding = self.model.encode(
+            f"query: {query}",
+            normalize_embeddings=True
+        )
+        text_embeddings = self.model.encode(
+            [f"passage: {t}" for t in valid_texts],
+            normalize_embeddings=True,
+            batch_size=EMBEDDINGS_BATCH_SIZE,
+            show_progress_bar=False,
+        )
+
+        # Calculate similarities using vectorized operation
+        scores = np.dot(text_embeddings, query_embedding)
+
+        # Filter and build results
+        ranked = []
+        for idx, (orig_idx, score) in enumerate(zip(valid_indices, scores)):
+            if score >= min_score:
+                ds = datasets[orig_idx]
+                ds["semantic_score"] = round(float(score), 4)
+                ranked.append(ds)
+
+        # Sort by score descending
         ranked.sort(key=lambda x: x.get("semantic_score", 0), reverse=True)
         return ranked[:top_k]
 
@@ -613,9 +672,9 @@ class MetadataCache:
     Caches data that rarely changes to reduce API calls. Cache expires after TTL.
     """
 
-    CACHE_DIR = Path.home() / ".cache" / "datos-gob-es"
-    CACHE_FILE = CACHE_DIR / "metadata.pkl"
-    CACHE_TTL = 24 * 60 * 60  # 24 hours in seconds
+    _CACHE_DIR = CACHE_DIR
+    CACHE_FILE = _CACHE_DIR / "metadata.pkl"
+    _CACHE_TTL = CACHE_TTL_HOURS * 60 * 60  # Convert hours to seconds
 
     def __init__(self):
         self.publishers: list[dict] | None = None
@@ -629,13 +688,13 @@ class MetadataCache:
 
     def _ensure_cache_dir(self):
         """Create cache directory if it doesn't exist."""
-        self.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self._CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     def _is_cache_valid(self) -> bool:
         """Check if cache is still valid based on TTL."""
         if self._cache_timestamp is None:
             return False
-        return (time.time() - self._cache_timestamp) < self.CACHE_TTL
+        return (time.time() - self._cache_timestamp) < self._CACHE_TTL
 
     def _load_cache(self) -> bool:
         """Load metadata from cache file if it exists and is valid.
@@ -698,17 +757,35 @@ class MetadataCache:
             self.CACHE_FILE.unlink()
         logger.info("metadata_cache_cleared")
 
-    async def get_publishers(self, client: "DatosGobClient") -> list[dict]:
-        """Get publishers, using cache if available."""
-        if self.publishers and self._is_cache_valid():
-            return self.publishers
+    async def _fetch_all_paginated(
+        self,
+        client: "DatosGobClient",
+        fetch_method: str,
+        cache_attr: str,
+    ) -> list[dict]:
+        """Generic method to fetch all pages of a metadata type.
+
+        Args:
+            client: The API client instance.
+            fetch_method: Name of the client method to call.
+            cache_attr: Name of the cache attribute to store results.
+
+        Returns:
+            List of all fetched items.
+        """
+        # Check cache first
+        cached = getattr(self, cache_attr, None)
+        if cached and self._is_cache_valid():
+            return cached
 
         # Fetch all pages
         all_items: list[dict] = []
         page = 0
+        method = getattr(client, fetch_method)
+
         while True:
             pagination = PaginationParams(page=page, page_size=50)
-            data = await client.list_publishers(pagination)
+            data = await method(pagination)
             items = data.get("result", {}).get("items", [])
             if not items:
                 break
@@ -717,125 +794,74 @@ class MetadataCache:
                 break
             page += 1
 
-        self.publishers = all_items
+        # Update cache
+        setattr(self, cache_attr, all_items)
         self._cache_timestamp = time.time()
         self._save_cache()
-        return self.publishers
+
+        return all_items
+
+    async def get_publishers(self, client: "DatosGobClient") -> list[dict]:
+        """Get publishers, using cache if available."""
+        return await self._fetch_all_paginated(client, "list_publishers", "publishers")
 
     async def get_themes(self, client: "DatosGobClient") -> list[dict]:
         """Get themes, using cache if available."""
-        if self.themes and self._is_cache_valid():
-            return self.themes
-
-        all_items: list[dict] = []
-        page = 0
-        while True:
-            pagination = PaginationParams(page=page, page_size=50)
-            data = await client.list_themes(pagination)
-            items = data.get("result", {}).get("items", [])
-            if not items:
-                break
-            all_items.extend(items)
-            if len(items) < 50:
-                break
-            page += 1
-
-        self.themes = all_items
-        self._cache_timestamp = time.time()
-        self._save_cache()
-        return self.themes
+        return await self._fetch_all_paginated(client, "list_themes", "themes")
 
     async def get_provinces(self, client: "DatosGobClient") -> list[dict]:
         """Get provinces, using cache if available."""
-        if self.provinces and self._is_cache_valid():
-            return self.provinces
-
-        all_items: list[dict] = []
-        page = 0
-        while True:
-            pagination = PaginationParams(page=page, page_size=50)
-            data = await client.list_provinces(pagination)
-            items = data.get("result", {}).get("items", [])
-            if not items:
-                break
-            all_items.extend(items)
-            if len(items) < 50:
-                break
-            page += 1
-
-        self.provinces = all_items
-        self._cache_timestamp = time.time()
-        self._save_cache()
-        return self.provinces
+        return await self._fetch_all_paginated(client, "list_provinces", "provinces")
 
     async def get_autonomous_regions(self, client: "DatosGobClient") -> list[dict]:
         """Get autonomous regions, using cache if available."""
-        if self.autonomous_regions and self._is_cache_valid():
-            return self.autonomous_regions
-
-        all_items: list[dict] = []
-        page = 0
-        while True:
-            pagination = PaginationParams(page=page, page_size=50)
-            data = await client.list_autonomous_regions(pagination)
-            items = data.get("result", {}).get("items", [])
-            if not items:
-                break
-            all_items.extend(items)
-            if len(items) < 50:
-                break
-            page += 1
-
-        self.autonomous_regions = all_items
-        self._cache_timestamp = time.time()
-        self._save_cache()
-        return self.autonomous_regions
+        return await self._fetch_all_paginated(client, "list_autonomous_regions", "autonomous_regions")
 
     async def get_public_sectors(self, client: "DatosGobClient") -> list[dict]:
         """Get public sectors, using cache if available."""
-        if self.public_sectors and self._is_cache_valid():
-            return self.public_sectors
-
-        all_items: list[dict] = []
-        page = 0
-        while True:
-            pagination = PaginationParams(page=page, page_size=50)
-            data = await client.list_public_sectors(pagination)
-            items = data.get("result", {}).get("items", [])
-            if not items:
-                break
-            all_items.extend(items)
-            if len(items) < 50:
-                break
-            page += 1
-
-        self.public_sectors = all_items
-        self._cache_timestamp = time.time()
-        self._save_cache()
-        return self.public_sectors
+        return await self._fetch_all_paginated(client, "list_public_sectors", "public_sectors")
 
     async def get_spatial_coverage(self, client: "DatosGobClient") -> list[dict]:
         """Get spatial coverage options, using cache if available."""
-        if self.spatial_coverage and self._is_cache_valid():
-            return self.spatial_coverage
+        return await self._fetch_all_paginated(client, "list_spatial_coverage", "spatial_coverage")
 
-        all_items: list[dict] = []
-        page = 0
-        while True:
-            pagination = PaginationParams(page=page, page_size=50)
-            data = await client.list_spatial_coverage(pagination)
-            items = data.get("result", {}).get("items", [])
-            if not items:
-                break
-            all_items.extend(items)
-            if len(items) < 50:
-                break
-            page += 1
+    async def preload_all(self, client: "DatosGobClient") -> None:
+        """Load all metadata in parallel for better performance.
 
-        self.spatial_coverage = all_items
-        self._cache_timestamp = time.time()
-        self._save_cache()
-        return self.spatial_coverage
+        This method fetches all metadata types concurrently, which is faster
+        than fetching them sequentially when multiple types are needed.
+        """
+        if self._is_cache_valid() and all([
+            self.publishers, self.themes, self.provinces,
+            self.autonomous_regions, self.public_sectors, self.spatial_coverage
+        ]):
+            logger.debug("metadata_preload_skipped", reason="cache_valid")
+            return
+
+        logger.info("metadata_preload_start")
+        start_time = time.time()
+
+        results = await asyncio.gather(
+            self.get_publishers(client),
+            self.get_themes(client),
+            self.get_provinces(client),
+            self.get_autonomous_regions(client),
+            self.get_public_sectors(client),
+            self.get_spatial_coverage(client),
+            return_exceptions=True,
+        )
+
+        # Log any failures
+        metadata_names = [
+            "publishers", "themes", "provinces",
+            "autonomous_regions", "public_sectors", "spatial_coverage"
+        ]
+        for name, result in zip(metadata_names, results):
+            if isinstance(result, Exception):
+                logger.warning("metadata_preload_partial_failure", metadata=name, error=str(result))
+
+        duration_ms = (time.time() - start_time) * 1000
+        logger.info("metadata_preload_complete", duration_ms=round(duration_ms, 2))
 
 
 # Global semantic ranker instance
@@ -843,6 +869,14 @@ semantic_ranker = SemanticRanker()
 
 # Global metadata cache instance
 metadata_cache = MetadataCache()
+
+# Optional: Pre-load embeddings model at startup for faster first search
+if PRELOAD_EMBEDDINGS_MODEL:
+    try:
+        semantic_ranker._load_model()
+        logger.info("embeddings_model_preloaded", model=SEMANTIC_MODEL_NAME)
+    except Exception as e:
+        logger.warning("embeddings_model_preload_failed", error=str(e))
 
 
 # =============================================================================
@@ -962,27 +996,19 @@ usage_metrics = UsageMetrics()
 # =============================================================================
 
 
-class DatosGobClientError(Exception):
-    """Exception raised for API client errors."""
-
-    def __init__(self, message: str, status_code: int | None = None):
-        self.message = message
-        self.status_code = status_code
-        super().__init__(self.message)
+# DatosGobClientError is now imported from core.exceptions
 
 
-class DatosGobClient:
+class DatosGobClient(BaseAPIClient):
     """Async HTTP client for the datos.gob.es API.
 
-    Uses HTTPClient for automatic logging and rate limiting.
+    Uses BaseAPIClient for automatic logging and rate limiting.
+    Overrides _request to add .json extension to endpoints.
     """
 
-    BASE_URL = "https://datos.gob.es/apidata/"
-    DEFAULT_TIMEOUT = 30.0
-
-    def __init__(self, timeout: float = DEFAULT_TIMEOUT):
-        self.timeout = timeout
-        self.http = HTTPClient("datos.gob.es", self.BASE_URL, timeout)
+    BASE_URL = DATOS_GOB_BASE_URL
+    API_NAME = "datos.gob.es"
+    ERROR_CLASS = DatosGobClientError
 
     def _build_params(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
         """Build query parameters from pagination settings."""
@@ -1004,9 +1030,8 @@ class DatosGobClient:
             return await self.http.get_json(endpoint, params=params)
         except Exception as e:
             # Re-raise as DatosGobClientError for backwards compatibility
-            if hasattr(e, 'status_code'):
-                raise DatosGobClientError(str(e), status_code=e.status_code) from e
-            raise DatosGobClientError(str(e)) from e
+            status_code = getattr(e, "status_code", None)
+            raise DatosGobClientError(str(e), status_code=status_code) from e
 
     async def list_datasets(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
         params = self._build_params(pagination)
@@ -1166,16 +1191,14 @@ def _format_response(
 
 def _handle_error(e: Exception) -> str:
     """Format error message."""
-    if isinstance(e, DatosGobClientError):
-        return json.dumps({"error": e.message, "status_code": e.status_code}, ensure_ascii=False)
-    return json.dumps({"error": str(e)}, ensure_ascii=False)
+    return handle_api_error(e, context="datos_gob_operation", logger_name="datos_gob_es")
 
 
 async def _fetch_all_pages(
     fetch_fn,
-    max_results: int = 100,
+    max_results: int = MAX_SEARCH_RESULTS,
     sort: str | None = None,
-    parallel_pages: int = 5,
+    parallel_pages: int = PARALLEL_PAGES,
     **kwargs,
 ) -> list[dict[str, Any]]:
     """Fetch all pages from an API endpoint up to max_results.
@@ -1442,12 +1465,8 @@ def _filter_datasets_locally(
     return filtered
 
 
-# Fixed page size for all queries (API maximum is 50)
-DEFAULT_PAGE_SIZE = 50
-
-# Maximum bytes to download for preview
-PREVIEW_MAX_BYTES = 100 * 1024  # 100KB
-PREVIEW_TIMEOUT = 10.0  # 10 seconds
+# Constants are now imported from core.config:
+# DEFAULT_PAGE_SIZE, PREVIEW_MAX_BYTES, PREVIEW_TIMEOUT
 
 async def _search_by_keywords_combined(
     keywords: list[str],
@@ -1795,7 +1814,7 @@ def _calculate_column_stats(columns: list[str], rows: list[list[Any]], max_sampl
 
         # Calculate unique count (only if reasonable number of values)
         unique_count = None
-        if len(non_null_values) <= 1000:
+        if len(non_null_values) <= MAX_STATS_ROWS:
             try:
                 unique_count = len(set(str(v) for v in non_null_values))
             except (TypeError, ValueError):
@@ -2038,8 +2057,8 @@ def _parse_csv_full(content: str) -> dict[str, Any]:
         columns = rows_list[0] if rows_list else []
         data_rows = rows_list[1:]
 
-        # Calculate column statistics on sample (first 1000 rows)
-        sample_rows = data_rows[:1000]
+        # Calculate column statistics on sample (first MAX_STATS_ROWS rows)
+        sample_rows = data_rows[:MAX_STATS_ROWS]
         column_stats = _calculate_column_stats(columns, sample_rows)
 
         return {
@@ -2090,7 +2109,7 @@ def _parse_json_full(content: str) -> dict[str, Any]:
             data_rows.append(row)
 
         # Calculate column statistics on sample
-        sample_rows = data_rows[:1000]
+        sample_rows = data_rows[:MAX_STATS_ROWS]
         column_stats = _calculate_column_stats(columns, sample_rows)
 
         return {
@@ -2109,8 +2128,8 @@ async def _download_full_data(
     access_url: str,
     format_str: str | None,
     media_type: str | None,
-    max_bytes: int = 50 * 1024 * 1024,  # 50MB default
-    timeout: float = 120.0,
+    max_bytes: int = DOWNLOAD_MAX_BYTES,
+    timeout: float = DOWNLOAD_TIMEOUT,
 ) -> dict[str, Any]:
     """Download and parse full data from a distribution URL.
 
@@ -2339,7 +2358,7 @@ async def _add_previews_to_dataset_list(
 async def _format_response_with_dataset_preview(
     data: dict[str, Any],
     lang: str | None = "es",
-    preview_rows: int = 10,
+    preview_rows: int = DEFAULT_PREVIEW_ROWS,
 ) -> str:
     """Format API response with data previews for datasets."""
     result = data.get("result", {})
@@ -2405,10 +2424,10 @@ async def _search_datasets_impl(
     sort: str | None = None,
     lang: str | None = "es",
     fetch_all: bool = False,
-    max_results: int = 100,
+    max_results: int = MAX_SEARCH_RESULTS,
     include_preview: bool = False,
-    preview_rows: int = 10,
-    semantic_min_score: float = 0.5,
+    preview_rows: int = DEFAULT_PREVIEW_ROWS,
+    semantic_min_score: float = SEMANTIC_MIN_SCORE,
     license: str | None = None,
     frequency: str | None = None,
 ) -> str:
@@ -2458,7 +2477,7 @@ async def _search_datasets_impl(
         date_start = _validate_date(date_start, "date_start")
         date_end = _validate_date(date_end, "date_end")
 
-        max_results = min(max_results, 100)  # Safety limit
+        max_results = min(max_results, MAX_SEARCH_RESULTS)  # Safety limit
         pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
         data: dict[str, Any] | None = None
         local_filters: dict[str, Any] = {}
@@ -2513,7 +2532,7 @@ async def _search_datasets_impl(
                 }, ensure_ascii=False, indent=2)
 
             # Construir summaries para el pool de candidatos (máx 500)
-            max_candidates = 500
+            max_candidates = MAX_SEMANTIC_CANDIDATES
             datasets = []
             for item in unique_items[:max_candidates]:
                 summary = DatasetSummary.from_api_item(item, lang)
@@ -2752,10 +2771,10 @@ async def search_datasets(
     sort: str | None = None,
     lang: str | None = "es",
     fetch_all: bool = False,
-    max_results: int = 100,
+    max_results: int = MAX_SEARCH_RESULTS,
     include_preview: bool = False,
-    preview_rows: int = 10,
-    semantic_min_score: float = 0.5,
+    preview_rows: int = DEFAULT_PREVIEW_ROWS,
+    semantic_min_score: float = SEMANTIC_MIN_SCORE,
     license: str | None = None,
     frequency: str | None = None,
 ) -> str:
@@ -2820,7 +2839,7 @@ async def download_data(
     dataset_id: str,
     format: str | None = None,
     max_rows: int | None = None,
-    max_mb: int = 10,
+    max_mb: int = MAX_DOWNLOAD_MB,
 ) -> str:
     """Download full data from a dataset (not just preview).
 
@@ -2840,7 +2859,7 @@ async def download_data(
     usage_metrics.record_tool_call("download_data")
     usage_metrics.record_dataset_access(dataset_id)
 
-    max_mb = min(max_mb, 50)  # Safety limit
+    max_mb = min(max_mb, MAX_DOWNLOAD_MB)  # Safety limit
 
     try:
         # Get dataset distributions

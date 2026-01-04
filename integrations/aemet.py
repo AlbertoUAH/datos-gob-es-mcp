@@ -12,7 +12,14 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from core import HTTPClient, get_logger
+from core import get_logger, HTTPClient, AEMETClientError, handle_api_error
+from core.config import (
+    AEMET_BASE_URL,
+    HTTP_DEFAULT_TIMEOUT,
+    AEMET_MAX_FORECAST_DAYS,
+    AEMET_MAX_OBSERVATIONS,
+    AEMET_MAX_MUNICIPALITIES,
+)
 
 # Load environment variables
 load_dotenv()
@@ -20,28 +27,22 @@ load_dotenv()
 logger = get_logger("aemet")
 
 
-class AEMETClientError(Exception):
-    """Exception raised for AEMET API client errors."""
-
-    def __init__(self, message: str, status_code: int | None = None):
-        self.message = message
-        self.status_code = status_code
-        super().__init__(self.message)
-
-
 class AEMETClient:
     """Async HTTP client for the AEMET OpenData API.
 
     Uses HTTPClient for automatic logging and rate limiting.
+    Note: AEMET has a special two-step request process (get URL, then fetch data),
+    so it doesn't inherit from BaseAPIClient directly.
     """
 
-    BASE_URL = "https://opendata.aemet.es/opendata/api/"
-    DEFAULT_TIMEOUT = 30.0
+    BASE_URL = AEMET_BASE_URL
+    API_NAME = "aemet"
+    ERROR_CLASS = AEMETClientError
 
-    def __init__(self, api_key: str | None = None, timeout: float = DEFAULT_TIMEOUT):
+    def __init__(self, api_key: str | None = None, timeout: float = HTTP_DEFAULT_TIMEOUT):
         self.api_key = api_key or os.getenv("AEMET_API_KEY")
         self.timeout = timeout
-        self.http = HTTPClient("aemet", self.BASE_URL, timeout)
+        self.http = HTTPClient(self.API_NAME, self.BASE_URL, timeout)
 
     def _get_headers(self) -> dict[str, str]:
         """Get request headers with API key."""
@@ -151,9 +152,7 @@ aemet_client = AEMETClient()
 
 def _handle_error(e: Exception) -> str:
     """Format error message."""
-    if isinstance(e, AEMETClientError):
-        return json.dumps({"error": e.message, "status_code": e.status_code}, ensure_ascii=False)
-    return json.dumps({"error": str(e)}, ensure_ascii=False)
+    return handle_api_error(e, context="aemet_operation", logger_name="aemet")
 
 
 def _format_forecast(forecast_data: list[dict[str, Any]]) -> dict[str, Any]:
@@ -166,7 +165,7 @@ def _format_forecast(forecast_data: list[dict[str, Any]]) -> dict[str, Any]:
     dias = prediccion.get("dia", [])
 
     formatted_days = []
-    for dia in dias[:7]:  # Max 7 days
+    for dia in dias[:AEMET_MAX_FORECAST_DAYS]:  # Max forecast days
         formatted_days.append({
             "fecha": dia.get("fecha"),
             "temp_max": dia.get("temperatura", {}).get("maxima") if isinstance(dia.get("temperatura"), dict) else None,
@@ -230,7 +229,7 @@ def register_aemet_tools(mcp):
 
             # Format observations
             observations = []
-            for obs in (data[:50] if isinstance(data, list) else [data]):  # Limit results
+            for obs in (data[:AEMET_MAX_OBSERVATIONS] if isinstance(data, list) else [data]):  # Limit results
                 observations.append({
                     "estacion": obs.get("ubi"),
                     "id": obs.get("idema"),
@@ -305,7 +304,7 @@ def register_aemet_tools(mcp):
                     "nombre": m.get("nombre"),
                     "provincia": m.get("id", "")[:2] if m.get("id") else None,  # First 2 digits = province
                 }
-                for m in municipalities[:500]  # Limit to first 500
+                for m in municipalities[:AEMET_MAX_MUNICIPALITIES]  # Limit municipalities
             ]
 
             output = {

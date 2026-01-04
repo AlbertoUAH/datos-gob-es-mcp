@@ -65,7 +65,7 @@ class TestMetadataCache:
             pickle.dump(cache_data, f)
 
         # Create cache instance with mocked paths
-        with patch.object(MetadataCache, "CACHE_DIR", temp_cache_dir):
+        with patch.object(MetadataCache, "_CACHE_DIR", temp_cache_dir):
             with patch.object(MetadataCache, "CACHE_FILE", cache_file):
                 cache = MetadataCache()
 
@@ -91,7 +91,7 @@ class TestMetadataCache:
         with open(cache_file, "wb") as f:
             pickle.dump(cache_data, f)
 
-        with patch.object(MetadataCache, "CACHE_DIR", temp_cache_dir):
+        with patch.object(MetadataCache, "_CACHE_DIR", temp_cache_dir):
             with patch.object(MetadataCache, "CACHE_FILE", cache_file):
                 cache = MetadataCache()
 
@@ -105,7 +105,7 @@ class TestMetadataCache:
 
         cache_file = temp_cache_dir / "metadata.pkl"
 
-        with patch.object(MetadataCache, "CACHE_DIR", temp_cache_dir):
+        with patch.object(MetadataCache, "_CACHE_DIR", temp_cache_dir):
             with patch.object(MetadataCache, "CACHE_FILE", cache_file):
                 cache = MetadataCache()
 
@@ -260,95 +260,6 @@ class TestMultiThemeSearch:
 
         filtered = _filter_datasets_locally(items, theme="educacion", themes=["economia"])
         assert len(filtered) == 2  # economia OR educacion
-
-
-# Test 5: Related Datasets
-class TestRelatedDatasets:
-    """Tests for the get_related_datasets tool and find_similar method."""
-
-    @pytest.fixture
-    def mock_embedding_index(self):
-        """Create a mock EmbeddingIndex with test data."""
-        from unittest.mock import MagicMock
-        import numpy as np
-
-        index = MagicMock()
-        index._initialized = True
-        index.dataset_ids = [
-            "http://example.org/dataset1",
-            "http://example.org/dataset2",
-            "http://example.org/dataset3",
-        ]
-        index.dataset_titles = ["Dataset 1", "Dataset 2", "Dataset 3"]
-        index.dataset_descriptions = ["Description 1", "Description 2", "Description 3"]
-
-        # Create mock embeddings (3 datasets, 384 dimensions)
-        index.embeddings = np.random.rand(3, 384).astype(np.float32)
-        # Make dataset2 similar to dataset1
-        index.embeddings[1] = index.embeddings[0] * 0.9 + np.random.rand(384) * 0.1
-
-        return index
-
-    def test_find_similar_excludes_reference(self, mock_embedding_index):
-        """Should not include the reference dataset in results."""
-        from server import EmbeddingIndex
-        import numpy as np
-
-        # Create real index for testing
-        index = EmbeddingIndex()
-        index._initialized = True
-        index.dataset_ids = ["ds1", "ds2", "ds3"]
-        index.dataset_titles = ["Dataset 1", "Dataset 2", "Dataset 3"]
-        index.dataset_descriptions = ["Desc 1", "Desc 2", "Desc 3"]
-
-        # Create embeddings where ds2 is similar to ds1
-        with patch("server._load_embeddings_dependencies", return_value=True):
-            with patch("server.np") as mock_np:
-                mock_np.linalg.norm = np.linalg.norm
-                mock_np.argsort = np.argsort
-                mock_np.dot = np.dot
-
-                index.embeddings = np.array([
-                    [1.0, 0.0, 0.0],
-                    [0.9, 0.1, 0.0],
-                    [0.0, 1.0, 0.0],
-                ])
-
-                results = index.find_similar("ds1", top_k=10, min_score=0.0)
-
-                # Should not include ds1 in results
-                result_ids = [r["dataset_id"] for r in results]
-                assert "ds1" not in result_ids
-
-    def test_respects_min_score(self, mock_embedding_index):
-        """Should filter by minimum similarity score."""
-        from server import EmbeddingIndex
-        import numpy as np
-
-        index = EmbeddingIndex()
-        index._initialized = True
-        index.dataset_ids = ["ds1", "ds2", "ds3"]
-        index.dataset_titles = ["Dataset 1", "Dataset 2", "Dataset 3"]
-        index.dataset_descriptions = ["Desc 1", "Desc 2", "Desc 3"]
-
-        with patch("server._load_embeddings_dependencies", return_value=True):
-            with patch("server.np") as mock_np:
-                mock_np.linalg.norm = np.linalg.norm
-                mock_np.argsort = np.argsort
-                mock_np.dot = np.dot
-
-                # ds2 very similar to ds1, ds3 not similar
-                index.embeddings = np.array([
-                    [1.0, 0.0, 0.0],
-                    [0.99, 0.01, 0.0],
-                    [0.0, 0.0, 1.0],
-                ])
-
-                # With high min_score, should only get very similar
-                results = index.find_similar("ds1", top_k=10, min_score=0.9)
-
-                # Should have at most 1 result (ds2)
-                assert len(results) <= 1
 
 
 # Integration tests

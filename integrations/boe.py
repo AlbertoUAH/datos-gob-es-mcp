@@ -8,32 +8,27 @@ import json
 from datetime import datetime
 from typing import Any
 
-from core import HTTPClient, get_logger
+from core import get_logger, BaseAPIClient, BOEClientError, handle_api_error
+from core.config import (
+    BOE_BASE_URL,
+    BOE_DEFAULT_SEARCH_DAYS,
+    BOE_MAX_SEARCH_DAYS,
+    BOE_BATCH_SIZE,
+    BOE_MAX_RESULTS,
+)
 
 logger = get_logger("boe")
 
 
-class BOEClientError(Exception):
-    """Exception raised for BOE API client errors."""
-
-    def __init__(self, message: str, status_code: int | None = None):
-        self.message = message
-        self.status_code = status_code
-        super().__init__(self.message)
-
-
-class BOEClient:
+class BOEClient(BaseAPIClient):
     """Async HTTP client for the BOE Open Data API.
 
-    Uses HTTPClient for automatic logging and rate limiting.
+    Uses BaseAPIClient for automatic logging and rate limiting.
     """
 
-    BASE_URL = "https://www.boe.es/datosabiertos/api/"
-    DEFAULT_TIMEOUT = 30.0
-
-    def __init__(self, timeout: float = DEFAULT_TIMEOUT):
-        self.timeout = timeout
-        self.http = HTTPClient("boe", self.BASE_URL, timeout)
+    BASE_URL = BOE_BASE_URL
+    API_NAME = "boe"
+    ERROR_CLASS = BOEClientError
 
     async def _request(
         self,
@@ -150,10 +145,7 @@ boe_client = BOEClient()
 
 def _handle_error(e: Exception, context: str = "boe_operation") -> str:
     """Format and log error message."""
-    logger.warning("boe_error", context=context, error=str(e))
-    if isinstance(e, BOEClientError):
-        return json.dumps({"error": e.message, "status_code": e.status_code}, ensure_ascii=False)
-    return json.dumps({"error": str(e)}, ensure_ascii=False)
+    return handle_api_error(e, context=context, logger_name="boe")
 
 
 def _format_summary(summary: dict[str, Any]) -> dict[str, Any]:
@@ -361,11 +353,11 @@ def register_boe_tools(mcp):
 
         try:
             # Calculate days to search
-            days_to_search = 30
+            days_to_search = BOE_DEFAULT_SEARCH_DAYS
             if date_from and date_to:
                 d1 = datetime.strptime(date_from, "%Y%m%d")
                 d2 = datetime.strptime(date_to, "%Y%m%d")
-                days_to_search = min((d2 - d1).days + 1, 90)
+                days_to_search = min((d2 - d1).days + 1, BOE_MAX_SEARCH_DAYS)
 
             # Get starting point
             current = datetime.strptime(date_to, "%Y%m%d") if date_to else datetime.now()
@@ -388,7 +380,7 @@ def register_boe_tools(mcp):
                     return None
 
             # Process in batches
-            batch_size = 5
+            batch_size = BOE_BATCH_SIZE
             all_summaries = []
             for i in range(0, len(dates_to_check), batch_size):
                 batch = dates_to_check[i:i + batch_size]
@@ -412,7 +404,7 @@ def register_boe_tools(mcp):
                                     "seccion": seccion.get("nombre"),
                                     "departamento": dept.get("nombre"),
                                 })
-                                if len(results) >= 50:
+                                if len(results) >= BOE_MAX_RESULTS:
                                     break
 
             output = {
@@ -421,7 +413,7 @@ def register_boe_tools(mcp):
                 "date_to": date_to,
                 "days_searched": len(dates_to_check),
                 "total_results": len(results),
-                "documents": results[:50],
+                "documents": results[:BOE_MAX_RESULTS],
             }
             return json.dumps(output, ensure_ascii=False, indent=2)
         except Exception as e:

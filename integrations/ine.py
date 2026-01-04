@@ -7,41 +7,27 @@ Base URL: https://servicios.ine.es/wstempus/js/
 import json
 from typing import Any
 
-from core import HTTPClient, get_logger
+from core import get_logger, BaseAPIClient, INEClientError, handle_api_error
+from core.config import (
+    INE_BASE_URL,
+    DEFAULT_PAGE_SIZE,
+    INE_MAX_TABLES,
+    INE_MAX_DATA_RECORDS,
+    INE_DEFAULT_NLAST,
+)
 
 logger = get_logger("ine")
 
 
-class INEClientError(Exception):
-    """Exception raised for INE API client errors."""
-
-    def __init__(self, message: str, status_code: int | None = None):
-        self.message = message
-        self.status_code = status_code
-        super().__init__(self.message)
-
-
-class INEClient:
+class INEClient(BaseAPIClient):
     """Async HTTP client for the INE API.
 
-    Uses HTTPClient for automatic logging and rate limiting.
+    Uses BaseAPIClient for automatic logging and rate limiting.
     """
 
-    BASE_URL = "https://servicios.ine.es/wstempus/js/"
-    DEFAULT_TIMEOUT = 30.0
-
-    def __init__(self, timeout: float = DEFAULT_TIMEOUT):
-        self.timeout = timeout
-        self.http = HTTPClient("ine", self.BASE_URL, timeout)
-
-    async def _request(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
-        """Make an async HTTP request to the INE API with logging and rate limiting."""
-        try:
-            return await self.http.get_json(endpoint, params=params)
-        except Exception as e:
-            if hasattr(e, 'status_code'):
-                raise INEClientError(str(e), status_code=e.status_code) from e
-            raise INEClientError(str(e)) from e
+    BASE_URL = INE_BASE_URL
+    API_NAME = "ine"
+    ERROR_CLASS = INEClientError
 
     async def list_operations(self) -> list[dict[str, Any]]:
         """List all statistical operations available in INE."""
@@ -133,10 +119,7 @@ ine_client = INEClient()
 
 def _handle_error(e: Exception, context: str = "ine_operation") -> str:
     """Format and log error message."""
-    logger.warning("ine_error", context=context, error=str(e))
-    if isinstance(e, INEClientError):
-        return json.dumps({"error": e.message, "status_code": e.status_code}, ensure_ascii=False)
-    return json.dumps({"error": str(e)}, ensure_ascii=False)
+    return handle_api_error(e, context=context, logger_name="ine")
 
 
 def register_ine_tools(mcp):
@@ -146,7 +129,7 @@ def register_ine_tools(mcp):
     async def ine_list_operations(
         query: str | None = None,
         page: int = 0,
-        page_size: int = 50,
+        page_size: int = DEFAULT_PAGE_SIZE,
     ) -> str:
         """Search official Spanish statistics from INE (Instituto Nacional de Estadistica).
 
@@ -247,7 +230,7 @@ def register_ine_tools(mcp):
                         "period": t.get("T3_Periodo"),
                         "publication": t.get("T3_Publicacion"),
                     }
-                    for t in tables[:100]  # Limit results
+                    for t in tables[:INE_MAX_TABLES]  # Limit results
                 ],
             }
             return json.dumps(output, ensure_ascii=False, indent=2)
@@ -257,7 +240,7 @@ def register_ine_tools(mcp):
     @mcp.tool()
     async def ine_get_data(
         table_id: str,
-        n_last: int = 10,
+        n_last: int = INE_DEFAULT_NLAST,
     ) -> str:
         """Retrieve actual statistical data from an INE table.
 
@@ -283,7 +266,7 @@ def register_ine_tools(mcp):
 
             # Process data for cleaner output
             processed = []
-            for item in data[:500]:  # Limit to 500 records
+            for item in data[:INE_MAX_DATA_RECORDS]:  # Limit records
                 processed.append({
                     "name": item.get("Nombre"),
                     "value": item.get("Valor"),

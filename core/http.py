@@ -1,10 +1,16 @@
-"""HTTP client with integrated logging and rate limiting."""
+"""HTTP client with integrated logging, rate limiting, and connection pooling."""
 
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 
+from .config import (
+    HTTP_DEFAULT_TIMEOUT,
+    HTTP_POOL_MAX_KEEPALIVE,
+    HTTP_POOL_MAX_CONNECTIONS,
+    HTTP2_ENABLED,
+)
 from .logging import get_logger
 from .ratelimit import RateLimiter
 
@@ -21,11 +27,14 @@ class HTTPClientError(Exception):
 
 
 class HTTPClient:
-    """Async HTTP client with logging and rate limiting.
+    """Async HTTP client with logging, rate limiting, and connection pooling.
 
     This client wraps httpx and adds:
+    - Connection pooling for better performance (reuses connections)
+    - HTTP/2 support for multiplexing
     - Automatic rate limiting per API
     - Structured logging of all requests
+    - Gzip compression support
     - Consistent error handling
 
     Example:
@@ -33,11 +42,73 @@ class HTTPClient:
         response = await client.get("catalog/dataset.json")
     """
 
+    # Class-level connection pools (shared across instances with same base_url)
+    _pools: ClassVar[dict[str, httpx.AsyncClient]] = {}
+
+    @classmethod
+    def _get_pool_key(cls, base_url: str) -> str:
+        """Get pool key from base URL (normalize)."""
+        return base_url.rstrip("/")
+
+    @classmethod
+    def _get_pool(cls, base_url: str, timeout: float) -> httpx.AsyncClient:
+        """Get or create connection pool for base URL.
+
+        Connection pools are reused across HTTPClient instances to maximize
+        connection reuse and reduce latency.
+        """
+        pool_key = cls._get_pool_key(base_url)
+
+        if pool_key not in cls._pools:
+            cls._pools[pool_key] = httpx.AsyncClient(
+                timeout=timeout,
+                limits=httpx.Limits(
+                    max_keepalive_connections=HTTP_POOL_MAX_KEEPALIVE,
+                    max_connections=HTTP_POOL_MAX_CONNECTIONS,
+                ),
+                http2=HTTP2_ENABLED,
+                headers={
+                    "Accept-Encoding": "gzip, deflate",
+                },
+            )
+            logger.debug(
+                "connection_pool_created",
+                base_url=pool_key,
+                max_keepalive=HTTP_POOL_MAX_KEEPALIVE,
+                max_connections=HTTP_POOL_MAX_CONNECTIONS,
+                http2=HTTP2_ENABLED,
+            )
+
+        return cls._pools[pool_key]
+
+    @classmethod
+    async def close_all_pools(cls) -> None:
+        """Close all connection pools (for cleanup on shutdown)."""
+        for pool_key, pool in list(cls._pools.items()):
+            try:
+                await pool.aclose()
+                logger.debug("connection_pool_closed", base_url=pool_key)
+            except Exception as e:
+                logger.warning("connection_pool_close_error", base_url=pool_key, error=str(e))
+        cls._pools.clear()
+
+    @classmethod
+    async def close_pool(cls, base_url: str) -> None:
+        """Close a specific connection pool."""
+        pool_key = cls._get_pool_key(base_url)
+        if pool_key in cls._pools:
+            try:
+                await cls._pools[pool_key].aclose()
+                del cls._pools[pool_key]
+                logger.debug("connection_pool_closed", base_url=pool_key)
+            except Exception as e:
+                logger.warning("connection_pool_close_error", base_url=pool_key, error=str(e))
+
     def __init__(
         self,
         api_name: str,
         base_url: str,
-        timeout: float = 30.0,
+        timeout: float = HTTP_DEFAULT_TIMEOUT,
         rate_limit: bool = True,
     ):
         """Initialize HTTP client.
@@ -52,6 +123,8 @@ class HTTPClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.rate_limit = rate_limit
+        # Ensure pool exists for this base_url
+        self._pool = self._get_pool(self.base_url, timeout)
 
     def _build_url(self, endpoint: str) -> str:
         """Build full URL from endpoint."""
@@ -69,7 +142,7 @@ class HTTPClient:
         json_data: dict[str, Any] | None = None,
         raise_for_status: bool = True,
     ) -> httpx.Response:
-        """Make an HTTP request with logging and rate limiting.
+        """Make an HTTP request with logging, rate limiting, and connection reuse.
 
         Args:
             method: HTTP method (GET, POST, etc.)
@@ -102,63 +175,63 @@ class HTTPClient:
 
         start_time = time.perf_counter()
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                response = await client.request(
-                    method=method,
-                    url=url,
-                    params=params,
-                    headers=headers,
-                    json=json_data,
-                )
+        try:
+            # Use connection pool instead of creating new client each time
+            response = await self._pool.request(
+                method=method,
+                url=url,
+                params=params,
+                headers=headers,
+                json=json_data,
+            )
 
-                duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (time.perf_counter() - start_time) * 1000
 
-                # Log successful request
-                logger.info(
-                    "request_complete",
-                    api=self.api_name,
-                    method=method,
-                    url=url,
-                    status=response.status_code,
-                    duration_ms=round(duration_ms, 2),
-                )
+            # Log successful request
+            logger.info(
+                "request_complete",
+                api=self.api_name,
+                method=method,
+                url=url,
+                status=response.status_code,
+                duration_ms=round(duration_ms, 2),
+            )
 
-                # Raise for HTTP errors if requested
-                if raise_for_status:
-                    try:
-                        response.raise_for_status()
-                    except httpx.HTTPStatusError as e:
-                        raise HTTPClientError(
-                            f"HTTP {e.response.status_code}: {e.response.text[:200]}",
-                            status_code=e.response.status_code,
-                        ) from e
+            # Raise for HTTP errors if requested
+            if raise_for_status:
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as e:
+                    raise HTTPClientError(
+                        f"HTTP {e.response.status_code}: {e.response.text[:200]}",
+                        status_code=e.response.status_code,
+                    ) from e
 
-                return response
+            return response
 
-            except httpx.TimeoutException as e:
-                duration_ms = (time.perf_counter() - start_time) * 1000
-                logger.error(
-                    "request_timeout",
-                    api=self.api_name,
-                    method=method,
-                    url=url,
-                    duration_ms=round(duration_ms, 2),
-                    error=str(e),
-                )
-                raise HTTPClientError(f"Request timed out: {e}") from e
+        except httpx.TimeoutException as e:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            logger.error(
+                "request_timeout",
+                api=self.api_name,
+                method=method,
+                url=url,
+                duration_ms=round(duration_ms, 2),
+                error=str(e),
+            )
+            raise HTTPClientError(f"Request timed out: {e}") from e
 
-            except httpx.RequestError as e:
-                duration_ms = (time.perf_counter() - start_time) * 1000
-                logger.error(
-                    "request_failed",
-                    api=self.api_name,
-                    method=method,
-                    url=url,
-                    duration_ms=round(duration_ms, 2),
-                    error=str(e),
-                )
-                raise HTTPClientError(f"Request failed: {e}") from e
+        except httpx.RequestError as e:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            logger.error(
+                "request_failed",
+                api=self.api_name,
+                method=method,
+                url=url,
+                duration_ms=round(duration_ms, 2),
+                error=str(e),
+            )
+            raise HTTPClientError(f"Request failed: {e}") from e
 
     async def get(
         self,

@@ -225,7 +225,7 @@ class TestBOEClient:
             base_url = "https://www.boe.es/datosabiertos/api/"
 
             # Mock summary
-            mock.get(url__regex=r".*/boe/sumario/\d+/.*").respond(
+            mock.get(url__regex=r".*/boe/sumario/\d+").respond(
                 json={
                     "data": {
                         "sumario": {

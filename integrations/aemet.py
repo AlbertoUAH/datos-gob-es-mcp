@@ -80,7 +80,9 @@ class AEMETClient:
                 # Use a separate HTTPClient for the data URL (no rate limiting)
                 data_http = HTTPClient("aemet_data", "", self.timeout, rate_limit=False)
                 data_response = await data_http.get(data_url, headers=headers)
-                return data_response.json()
+                # AEMET returns data in Latin-1 encoding, not UTF-8
+                content = data_response.content.decode('latin-1')
+                return json.loads(content)
 
             return result
 

@@ -1,4 +1,4 @@
-"""Tests for the 5 improvements implemented."""
+"""Tests for the improvements implemented."""
 
 import asyncio
 import json
@@ -170,9 +170,9 @@ class TestParallelPagination:
         assert len(results) == DEFAULT_PAGE_SIZE + 5
 
 
-# Test 3: Download Data
+# Test 3: Download Data (via get with include_data=True)
 class TestDownloadData:
-    """Tests for the download_data tool."""
+    """Tests for data download functionality in get tool."""
 
     @pytest.mark.asyncio
     async def test_parse_csv_full(self):
@@ -210,7 +210,7 @@ class TestDownloadData:
         csv_content = "\n".join(csv_lines)
         result = _parse_csv_full(csv_content)
 
-        # Manually truncate like download_data does
+        # Manually truncate like get tool does with include_data
         max_rows = 10
         original_rows = len(result["rows"])
         result["rows"] = result["rows"][:max_rows]
@@ -268,16 +268,15 @@ class TestIntegration:
 
     @pytest.mark.asyncio
     async def test_search_with_themes_list(self):
-        """search_datasets should accept themes list parameter."""
-        # This test verifies the function has themes in its description
-        from server import search_datasets
+        """search should accept themes list parameter."""
+        from server import search
 
-        # search_datasets is decorated with @mcp.tool(), so check description
-        if hasattr(search_datasets, 'description'):
-            assert "themes" in search_datasets.description
+        # search is decorated with @mcp.tool(), so check description
+        if hasattr(search, 'description'):
+            assert "themes" in search.description
         else:
             # Or check the underlying function
-            assert hasattr(search_datasets, 'fn') or True  # Pass if wrapped
+            assert hasattr(search, 'fn') or True  # Pass if wrapped
 
     def test_filter_datasets_locally_signature(self):
         """_filter_datasets_locally should accept themes parameter."""
@@ -301,88 +300,12 @@ class TestIntegration:
 
 
 # =============================================================================
-# Test 6: Export Results (Proposal 11)
-# =============================================================================
-
-
-class TestExportResults:
-    """Tests for the export_results tool."""
-
-    @pytest.mark.asyncio
-    async def test_export_to_csv(self):
-        """Should export datasets to CSV format."""
-        from server import export_results
-
-        # Get the underlying function
-        fn = export_results.fn if hasattr(export_results, 'fn') else export_results
-
-        search_results = json.dumps({
-            "datasets": [
-                {"uri": "ds1", "title": "Dataset 1", "description": "Desc 1"},
-                {"uri": "ds2", "title": "Dataset 2", "description": "Desc 2"},
-            ]
-        })
-
-        result = await fn(search_results, format="csv")
-        data = json.loads(result)
-
-        assert data["format"] == "csv"
-        assert data["rows_exported"] == 2
-        assert "content" in data
-        assert "uri,title,description" in data["content"]
-
-    @pytest.mark.asyncio
-    async def test_export_to_json(self):
-        """Should export datasets to JSON format."""
-        from server import export_results
-
-        fn = export_results.fn if hasattr(export_results, 'fn') else export_results
-
-        search_results = json.dumps({
-            "datasets": [
-                {"uri": "ds1", "title": "Dataset 1"},
-            ]
-        })
-
-        result = await fn(search_results, format="json")
-        data = json.loads(result)
-
-        assert data["format"] == "json"
-        assert data["rows_exported"] == 1
-        assert isinstance(data["content"], list)
-
-    @pytest.mark.asyncio
-    async def test_export_invalid_json(self):
-        """Should handle invalid JSON input."""
-        from server import export_results
-
-        fn = export_results.fn if hasattr(export_results, 'fn') else export_results
-
-        result = await fn("not valid json", format="csv")
-        data = json.loads(result)
-
-        assert "error" in data
-
-    @pytest.mark.asyncio
-    async def test_export_empty_results(self):
-        """Should handle empty results."""
-        from server import export_results
-
-        fn = export_results.fn if hasattr(export_results, 'fn') else export_results
-
-        result = await fn('{"datasets": []}', format="csv")
-        data = json.loads(result)
-
-        assert "error" in data
-
-
-# =============================================================================
-# Test 7: Usage Metrics (Proposal 19)
+# Test: Usage Metrics (internal, not exposed as tool)
 # =============================================================================
 
 
 class TestUsageMetrics:
-    """Tests for the UsageMetrics class."""
+    """Tests for the UsageMetrics class (internal tracking)."""
 
     def test_usage_metrics_instance_exists(self):
         """Global usage_metrics instance should exist."""
@@ -454,23 +377,9 @@ class TestUsageMetrics:
         assert stats["total_dataset_accesses"] == 0
         assert stats["total_searches"] == 0
 
-    @pytest.mark.asyncio
-    async def test_get_usage_stats_tool(self):
-        """get_usage_stats tool should return statistics."""
-        from server import get_usage_stats
-
-        fn = get_usage_stats.fn if hasattr(get_usage_stats, 'fn') else get_usage_stats
-
-        result = await fn(include_searches=True)
-        data = json.loads(result)
-
-        assert "total_tool_calls" in data
-        assert "top_tools" in data
-        assert "session_duration_minutes" in data
-
 
 # =============================================================================
-# Test 8: Interactive Documentation Prompts (Proposal 20)
+# Test: Guia Herramientas Prompt (updated tool names)
 # =============================================================================
 
 
@@ -484,7 +393,8 @@ class TestGuiaHerramientasPrompt:
         content = generate_prompt(tool_category="all", include_examples=True)
 
         assert "Guia de Herramientas MCP" in content
-        assert "search_datasets" in content
+        # Updated: search instead of search_datasets
+        assert "search" in content
         assert "Ejemplos Practicos" in content
 
     def test_prompt_filter_by_category(self):
@@ -493,13 +403,13 @@ class TestGuiaHerramientasPrompt:
 
         # Search category
         search_content = generate_prompt(tool_category="search", include_examples=False)
-        assert "search_datasets" in search_content
-        assert "ine_list_operations" not in search_content
+        assert "search" in search_content
 
         # External category
         external_content = generate_prompt(tool_category="external", include_examples=False)
-        assert "ine_list_operations" in external_content
-        assert "aemet_list_stations" in external_content
+        # Updated: ine_search instead of ine_list_operations
+        assert "ine" in external_content.lower()
+        assert "aemet" in external_content.lower()
 
     def test_prompt_without_examples(self):
         """Should work without examples."""

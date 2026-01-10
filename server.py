@@ -1149,7 +1149,40 @@ class DatosGobClient(BaseAPIClient):
 # MCP SERVER
 # =============================================================================
 
-mcp = FastMCP("datos-gob-es")
+# Metadata reference - use these IDs with the search() tool
+METADATA_REFERENCE = """
+## Metadata Reference for search() filters
+
+### Themes (use with theme= parameter)
+economia, hacienda, educacion, salud, medio-ambiente, transporte, turismo,
+empleo, sector-publico, ciencia-tecnologia, cultura-ocio, urbanismo-infraestructuras, energia
+
+### Main Publishers (use with publisher= parameter)
+- EA0010587: INE (Instituto Nacional de Estadística)
+- E05024401: Ministerio de Hacienda
+- E05024301: Ministerio de Economía
+- E00003901: AEMET (Agencia Estatal de Meteorología)
+- L01280796: Ayuntamiento de Madrid
+- L01080193: Ajuntament de Barcelona
+- A08002970: Generalitat de Catalunya
+- A01002820: Gobierno Vasco
+- A13002908: Junta de Andalucía
+
+### Province Codes (first 2 digits of municipality codes)
+01-Álava, 02-Albacete, 03-Alicante, 04-Almería, 05-Ávila, 06-Badajoz, 07-Baleares,
+08-Barcelona, 09-Burgos, 10-Cáceres, 11-Cádiz, 12-Castellón, 13-Ciudad Real,
+14-Córdoba, 15-A Coruña, 16-Cuenca, 17-Girona, 18-Granada, 19-Guadalajara,
+20-Guipúzcoa, 21-Huelva, 22-Huesca, 23-Jaén, 24-León, 25-Lleida, 26-La Rioja,
+27-Lugo, 28-Madrid, 29-Málaga, 30-Murcia, 31-Navarra, 32-Ourense, 33-Asturias,
+34-Palencia, 35-Las Palmas, 36-Pontevedra, 37-Salamanca, 38-Santa Cruz de Tenerife,
+39-Cantabria, 40-Segovia, 41-Sevilla, 42-Soria, 43-Tarragona, 44-Teruel, 45-Toledo,
+46-Valencia, 47-Valladolid, 48-Vizcaya, 49-Zamora, 50-Zaragoza, 51-Ceuta, 52-Melilla
+"""
+
+mcp = FastMCP(
+    "datos-gob-es",
+    instructions=METADATA_REFERENCE,
+)
 
 client = DatosGobClient()
 
@@ -2386,25 +2419,101 @@ async def _format_response_with_dataset_preview(
 
 
 @mcp.tool()
-async def get_dataset(dataset_id: str, lang: str | None = "es") -> str:
-    """Get detailed information about a specific dataset.
+async def get(
+    dataset_id: str,
+    include_data: bool = False,
+    format: str | None = None,
+    max_rows: int | None = None,
+    max_mb: int = MAX_DOWNLOAD_MB,
+    lang: str | None = "es",
+) -> str:
+    """Get dataset metadata and optionally download its data.
 
-    Retrieve complete metadata for a dataset including all its distributions
-    (downloadable files), description, publisher, and update frequency.
+    Retrieve complete metadata for a dataset including all its distributions.
+    Optionally download and parse the actual data.
 
     Args:
         dataset_id: The dataset identifier (slug from the URL or URI).
-        lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'. Use None for all.
+        include_data: If True, downloads and includes actual data (default: False).
+        format: Preferred format when include_data=True ('csv', 'json'). Default: tries CSV first.
+        max_rows: Maximum rows to return when include_data=True. None for all rows.
+        max_mb: Maximum download size in MB (default 10, max 50).
+        lang: Preferred language ('es', 'en', 'ca', 'eu', 'gl'). Default 'es'.
 
     Returns:
-        JSON with full dataset details including download URLs.
+        JSON with dataset metadata. If include_data=True, also includes columns and rows.
     """
-    usage_metrics.record_tool_call("get_dataset")
+    usage_metrics.record_tool_call("get")
     usage_metrics.record_dataset_access(dataset_id)
 
     try:
         data = await client.get_dataset(dataset_id)
-        return _format_response(data, "dataset", lang)
+
+        if not include_data:
+            return _format_response(data, "dataset", lang)
+
+        # Download data logic (from download_data)
+        max_mb = min(max_mb, MAX_DOWNLOAD_MB)  # Safety limit
+        distributions = data.get("result", {}).get("primaryTopic", {}).get("distribution", [])
+
+        if isinstance(distributions, dict):
+            distributions = [distributions]
+
+        if not distributions:
+            return json.dumps({"error": "No distributions found for this dataset"}, ensure_ascii=False)
+
+        # Find best distribution matching preferred format
+        best_dist = None
+        for dist in distributions:
+            dist_format = dist.get("format", "")
+            if isinstance(dist_format, dict):
+                dist_format = dist_format.get("_value", "")
+
+            normalized = _normalize_format(dist_format, dist.get("mediaType"))
+
+            if normalized in ("csv", "json", "tsv"):
+                if format:
+                    if normalized == format.lower():
+                        best_dist = dist
+                        break
+                elif not best_dist:
+                    best_dist = dist
+                    if normalized == "csv":
+                        break
+
+        if not best_dist:
+            available_formats = [d.get("format", {}).get("_value", d.get("format", "unknown"))
+                               for d in distributions]
+            return json.dumps({
+                "error": f"No compatible distribution found. Available formats: {available_formats}",
+                "supported_formats": ["csv", "json", "tsv"],
+            }, ensure_ascii=False)
+
+        access_url = best_dist.get("accessURL")
+        if not access_url:
+            return json.dumps({"error": "Distribution has no access URL"}, ensure_ascii=False)
+
+        # Download and parse
+        result = await _download_full_data(
+            access_url,
+            best_dist.get("format"),
+            best_dist.get("mediaType"),
+            max_bytes=max_mb * 1024 * 1024,
+        )
+
+        # Truncate rows if max_rows specified
+        if max_rows and "rows" in result:
+            original_rows = len(result["rows"])
+            result["rows"] = result["rows"][:max_rows]
+            if original_rows > max_rows:
+                result["rows_truncated_to"] = max_rows
+                result["total_rows_available"] = original_rows
+
+        result["dataset_id"] = dataset_id
+        result["source_url"] = access_url
+
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
     except Exception as e:
         return _handle_error(e)
 
@@ -2756,7 +2865,7 @@ async def _search_datasets_impl(
 
 
 @mcp.tool()
-async def search_datasets(
+async def search(
     query: str | None = None,
     title: str | None = None,
     publisher: str | None = None,
@@ -2788,8 +2897,8 @@ async def search_datasets(
         query: Natural language query (e.g., "accidentes de tráfico en Madrid").
                Extracts keywords, searches API, then re-ranks results by semantic similarity.
         title: Search text in dataset titles (direct API search, no semantic re-ranking).
-        publisher: Publisher ID (e.g., 'EA0010587' for INE). Use list_metadata('publishers') to find IDs.
-        theme: Theme ID (e.g., 'economia', 'salud'). Use list_metadata('themes') to find IDs.
+        publisher: Publisher ID (e.g., 'EA0010587' for INE, 'L01280796' for Ayto. Madrid).
+        theme: Theme ID (e.g., 'economia', 'salud', 'medio-ambiente', 'transporte').
         themes: List of theme IDs for multi-theme search (OR logic).
         format: Format ID (e.g., 'csv', 'json', 'xml').
         keyword: Keyword/tag to filter by (e.g., 'presupuesto').
@@ -2832,362 +2941,6 @@ async def search_datasets(
         license=license,
         frequency=frequency,
     )
-
-
-@mcp.tool()
-async def download_data(
-    dataset_id: str,
-    format: str | None = None,
-    max_rows: int | None = None,
-    max_mb: int = MAX_DOWNLOAD_MB,
-) -> str:
-    """Download full data from a dataset (not just preview).
-
-    Downloads and parses data from the first compatible distribution.
-    For large datasets, use max_rows to limit the returned data.
-
-    Args:
-        dataset_id: The dataset identifier (from search results or _about URI).
-        format: Preferred format ('csv', 'json'). If None, tries CSV first.
-        max_rows: Maximum rows to return. None for all rows (up to size limit).
-        max_mb: Maximum download size in MB (default 10, max 50).
-
-    Returns:
-        JSON with columns, rows, total_rows, format, and statistics.
-        Large responses may be truncated at max_mb.
-    """
-    usage_metrics.record_tool_call("download_data")
-    usage_metrics.record_dataset_access(dataset_id)
-
-    max_mb = min(max_mb, MAX_DOWNLOAD_MB)  # Safety limit
-
-    try:
-        # Get dataset distributions
-        data = await client.get_dataset(dataset_id)
-        distributions = data.get("result", {}).get("primaryTopic", {}).get("distribution", [])
-
-        if isinstance(distributions, dict):
-            distributions = [distributions]
-
-        if not distributions:
-            return json.dumps({"error": "No distributions found for this dataset"}, ensure_ascii=False)
-
-        # Find best distribution matching preferred format
-        best_dist = None
-        for dist in distributions:
-            dist_format = dist.get("format", "")
-            if isinstance(dist_format, dict):
-                dist_format = dist_format.get("_value", "")
-
-            normalized = _normalize_format(dist_format, dist.get("mediaType"))
-
-            if normalized in ("csv", "json", "tsv"):
-                if format:
-                    if normalized == format.lower():
-                        best_dist = dist
-                        break
-                elif not best_dist:
-                    best_dist = dist
-                    # Prefer CSV
-                    if normalized == "csv":
-                        break
-
-        if not best_dist:
-            available_formats = [d.get("format", {}).get("_value", d.get("format", "unknown"))
-                               for d in distributions]
-            return json.dumps({
-                "error": f"No compatible distribution found. Available formats: {available_formats}",
-                "supported_formats": ["csv", "json", "tsv"],
-            }, ensure_ascii=False)
-
-        access_url = best_dist.get("accessURL")
-        if not access_url:
-            return json.dumps({"error": "Distribution has no access URL"}, ensure_ascii=False)
-
-        # Download and parse
-        result = await _download_full_data(
-            access_url,
-            best_dist.get("format"),
-            best_dist.get("mediaType"),
-            max_bytes=max_mb * 1024 * 1024,
-        )
-
-        # Truncate rows if max_rows specified
-        if max_rows and "rows" in result:
-            original_rows = len(result["rows"])
-            result["rows"] = result["rows"][:max_rows]
-            if original_rows > max_rows:
-                result["rows_truncated_to"] = max_rows
-                result["total_rows_available"] = original_rows
-
-        result["dataset_id"] = dataset_id
-        result["source_url"] = access_url
-
-        return json.dumps(result, ensure_ascii=False, indent=2)
-
-    except Exception as e:
-        return _handle_error(e)
-
-
-# =============================================================================
-# METADATA TOOLS
-# =============================================================================
-
-
-@mcp.tool()
-async def list_metadata(
-    metadata_type: str,
-    page: int = 0,
-    use_cache: bool = True,
-) -> str:
-    """List metadata from datos.gob.es catalog.
-
-    Unified tool to list different types of catalog metadata.
-    Results are cached for 24 hours to improve performance.
-
-    Args:
-        metadata_type: Type of metadata to list. Valid values:
-            - 'publishers': Government organizations that publish data
-            - 'themes': Dataset categories (economia, salud, educacion, etc.)
-            - 'public_sectors': NTI public sector taxonomy
-            - 'provinces': Spanish provinces (50 + Ceuta and Melilla)
-            - 'autonomous_regions': Spanish autonomous communities (17 + 2 cities)
-        page: Page number (starting from 0). Ignored when use_cache=True.
-        use_cache: Use cached data if available (default True). Set False to force fresh fetch.
-
-    Returns:
-        JSON with metadata items and pagination info.
-
-    Examples:
-        list_metadata('themes') -> List all dataset categories
-        list_metadata('publishers') -> List all publishing organizations
-        list_metadata('provinces') -> List Spanish provinces
-    """
-    # Map metadata types to cache functions and client methods
-    METADATA_CONFIG = {
-        'publishers': {
-            'cache_fn': metadata_cache.get_publishers,
-            'client_fn': client.list_publishers,
-        },
-        'themes': {
-            'cache_fn': metadata_cache.get_themes,
-            'client_fn': client.list_themes,
-        },
-        'public_sectors': {
-            'cache_fn': metadata_cache.get_public_sectors,
-            'client_fn': client.list_public_sectors,
-        },
-        'provinces': {
-            'cache_fn': metadata_cache.get_provinces,
-            'client_fn': client.list_provinces,
-        },
-        'autonomous_regions': {
-            'cache_fn': metadata_cache.get_autonomous_regions,
-            'client_fn': client.list_autonomous_regions,
-        },
-    }
-
-    if metadata_type not in METADATA_CONFIG:
-        return json.dumps({
-            "error": f"Invalid metadata_type: '{metadata_type}'",
-            "valid_types": list(METADATA_CONFIG.keys()),
-            "hint": "Use one of the valid_types listed above",
-        }, ensure_ascii=False, indent=2)
-
-    config = METADATA_CONFIG[metadata_type]
-
-    try:
-        if use_cache:
-            items = await config['cache_fn'](client)
-            start = page * DEFAULT_PAGE_SIZE
-            end = start + DEFAULT_PAGE_SIZE
-            page_items = items[start:end]
-            return json.dumps({
-                "metadata_type": metadata_type,
-                "total_items": len(items),
-                "page": page,
-                "items_per_page": DEFAULT_PAGE_SIZE,
-                "cached": True,
-                "items": page_items,
-            }, ensure_ascii=False, indent=2)
-        else:
-            pagination = PaginationParams(page=page, page_size=DEFAULT_PAGE_SIZE)
-            data = await config['client_fn'](pagination)
-            return _format_response(data)
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.tool()
-async def refresh_metadata_cache() -> str:
-    """Force refresh of all cached metadata.
-
-    Clears the local metadata cache (publishers, themes, regions, provinces)
-    and fetches fresh data from the API. Use this if you suspect the cache
-    is outdated or after significant catalog changes.
-
-    The cache normally auto-refreshes every 24 hours.
-
-    Returns:
-        JSON with confirmation and statistics about refreshed data.
-    """
-    try:
-        # Clear existing cache
-        metadata_cache.clear()
-
-        # Fetch all metadata types in parallel
-        results = await asyncio.gather(
-            metadata_cache.get_publishers(client),
-            metadata_cache.get_themes(client),
-            metadata_cache.get_provinces(client),
-            metadata_cache.get_autonomous_regions(client),
-            metadata_cache.get_public_sectors(client),
-            metadata_cache.get_spatial_coverage(client),
-            return_exceptions=True,
-        )
-
-        stats = {
-            "status": "success",
-            "refreshed": {
-                "publishers": len(results[0]) if not isinstance(results[0], Exception) else "error",
-                "themes": len(results[1]) if not isinstance(results[1], Exception) else "error",
-                "provinces": len(results[2]) if not isinstance(results[2], Exception) else "error",
-                "autonomous_regions": len(results[3]) if not isinstance(results[3], Exception) else "error",
-                "public_sectors": len(results[4]) if not isinstance(results[4], Exception) else "error",
-                "spatial_coverage": len(results[5]) if not isinstance(results[5], Exception) else "error",
-            },
-            "cache_ttl_hours": 24,
-        }
-
-        return json.dumps(stats, ensure_ascii=False, indent=2)
-    except Exception as e:
-        return _handle_error(e)
-
-
-@mcp.tool()
-async def export_results(
-    search_results: str,
-    format: str = "csv",
-    include_preview: bool = False,
-) -> str:
-    """Export search results to CSV or JSON format for download.
-
-    Takes the JSON output from search_datasets or other search tools
-    and converts it to a downloadable format.
-
-    Args:
-        search_results: JSON string from a previous search_datasets call.
-        format: Output format - 'csv' or 'json' (default: csv).
-        include_preview: Include data preview columns if available (default: False).
-
-    Returns:
-        Formatted data as CSV or JSON string ready for saving to file.
-
-    Example workflow:
-        1. results = search_datasets(title="presupuesto", theme="economia")
-        2. csv_data = export_results(results, format="csv")
-        3. Save csv_data to file: presupuestos.csv
-    """
-    usage_metrics.record_tool_call("export_results")
-
-    try:
-        data = json.loads(search_results)
-    except json.JSONDecodeError:
-        return json.dumps({"error": "Invalid JSON input. Please provide output from search_datasets."})
-
-    # Extract datasets from various response formats
-    datasets = []
-    if "datasets" in data:
-        datasets = data["datasets"]
-    elif "items" in data:
-        datasets = data["items"]
-    elif isinstance(data, list):
-        datasets = data
-
-    if not datasets:
-        return json.dumps({"error": "No datasets found in input."})
-
-    # Define columns to export
-    base_columns = [
-        "uri", "title", "description", "publisher", "theme",
-        "modified", "keyword", "format", "distributions_count"
-    ]
-
-    preview_columns = ["preview_columns", "preview_row_count"] if include_preview else []
-    columns = base_columns + preview_columns
-
-    if format.lower() == "csv":
-        # Generate CSV
-        output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=columns, extrasaction='ignore')
-        writer.writeheader()
-
-        for ds in datasets:
-            row = {}
-            for col in columns:
-                value = ds.get(col, "")
-                # Handle lists and complex types
-                if isinstance(value, list):
-                    value = "; ".join(str(v) for v in value)
-                elif isinstance(value, dict):
-                    value = json.dumps(value, ensure_ascii=False)
-                row[col] = value
-            writer.writerow(row)
-
-        csv_content = output.getvalue()
-        return json.dumps({
-            "format": "csv",
-            "rows_exported": len(datasets),
-            "columns": columns,
-            "content": csv_content,
-            "save_as": "datasets_export.csv",
-        }, ensure_ascii=False, indent=2)
-
-    elif format.lower() == "json":
-        # Generate clean JSON
-        exported = []
-        for ds in datasets:
-            item = {col: ds.get(col) for col in columns if col in ds}
-            exported.append(item)
-
-        return json.dumps({
-            "format": "json",
-            "rows_exported": len(datasets),
-            "columns": columns,
-            "content": exported,
-            "save_as": "datasets_export.json",
-        }, ensure_ascii=False, indent=2)
-
-    else:
-        return json.dumps({"error": f"Unsupported format: {format}. Use 'csv' or 'json'."})
-
-
-@mcp.tool()
-async def get_usage_stats(include_searches: bool = True) -> str:
-    """Get usage statistics for MCP tools and datasets.
-
-    Shows which tools are used most frequently, which datasets are accessed
-    most often, and recent search patterns. Useful for understanding usage
-    patterns and optimizing workflows.
-
-    Args:
-        include_searches: Include recent search queries in output (default: True).
-
-    Returns:
-        JSON with usage statistics including:
-        - Top 10 most used tools
-        - Top 10 most accessed datasets
-        - Total counts and session duration
-        - Recent search patterns (if include_searches=True)
-    """
-    usage_metrics.record_tool_call("get_usage_stats")
-
-    stats = usage_metrics.get_stats()
-
-    if not include_searches:
-        stats.pop("recent_searches", None)
-
-    return json.dumps(stats, ensure_ascii=False, indent=2)
 
 
 # =============================================================================

@@ -36,7 +36,7 @@ El INE es la **fuente oficial y principal** de estadisticas en Espana. Siempre d
 consultarse primero para datos estadisticos oficiales.
 
 **Paso 1.1: Buscar operaciones estadisticas**
-Usa `ine_list_operations(query="{tema}")` para encontrar operaciones relacionadas.
+Usa `ine_search(query="{tema}")` para encontrar operaciones relacionadas.
 
 Ejemplos de operaciones INE relevantes:
 - "empleo" -> EPA (Encuesta de Poblacion Activa), paro registrado
@@ -47,11 +47,11 @@ Ejemplos de operaciones INE relevantes:
 - "vivienda" -> Precios de vivienda, hipotecas
 
 **Paso 1.2: Explorar tablas disponibles**
-Una vez identificada la operacion, usa `ine_list_tables(operation_id)` para ver
+Una vez identificada la operacion, usa `ine_search(operation_id="...")` para ver
 las tablas de datos disponibles.
 
 **Paso 1.3: Obtener datos**
-Usa `ine_get_data(table_id, n_last=10)` para obtener los datos estadisticos reales.
+Usa `ine_download(table_id, n_last=10)` para obtener los datos estadisticos reales.
 """
 
     datos_gob_section = ""
@@ -63,14 +63,14 @@ El portal datos.gob.es contiene datasets de multiples organismos, incluyendo
 datos que complementan las estadisticas del INE.
 
 **Paso 2.1: Buscar datasets**
-Usa `search_datasets(title="{tema}")` o `search_datasets(keyword="{tema}")`.
+Usa `search(title="{tema}")` o `search(keyword="{tema}")`.
 
 **Paso 2.2: Busqueda semantica (opcional)**
-Para busquedas mas inteligentes, usa `search_datasets(semantic_query="{tema}")`.
+Para busquedas mas inteligentes, usa `search(query="{tema}")`.
 
 **Paso 2.3: Obtener datos**
-Usa `get_dataset(dataset_id)` para metadatos y `download_data(dataset_id)` para
-descargar los datos.
+Usa `get(dataset_id)` para metadatos o `get(dataset_id, include_data=true)` para
+descargar los datos directamente.
 """
 
     return f"""# Busqueda de Estadisticas Oficiales de Espana
@@ -114,16 +114,16 @@ Al presentar los resultados, incluye:
 ## Ejemplo de Flujo Completo para "{tema}"
 
 ```
-1. ine_list_operations(query="{tema}")
+1. ine_search(query="{tema}")
    -> Obtener IDs de operaciones relevantes
 
-2. ine_list_tables(operation_id="...")
+2. ine_search(operation_id="...")
    -> Ver tablas disponibles
 
-3. ine_get_data(table_id="...", n_last=10)
+3. ine_download(table_id="...", n_last=10)
    -> Obtener datos reales
 
-4. search_datasets(title="{tema}")
+4. search(title="{tema}")
    -> Buscar datasets complementarios en datos.gob.es
 ```
 """

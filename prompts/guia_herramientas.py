@@ -15,7 +15,7 @@ def generate_prompt(
     Generate the tools documentation prompt.
 
     Args:
-        tool_category: Category to show ('all', 'search', 'metadata', 'external', 'utilities')
+        tool_category: Category to show ('all', 'search', 'external', 'utilities')
         include_examples: Whether to include usage examples
     """
     examples_section = ""
@@ -25,166 +25,130 @@ def generate_prompt(
 
 ### Ejemplo 1: Buscar y descargar datos de presupuestos
 ```
-1. search_datasets(title="presupuesto", theme="hacienda", include_preview=true)
-2. download_data(dataset_id="...", format="csv", max_mb=20)
-3. export_results(search_results="...", format="csv")
+1. search(title="presupuesto", theme="hacienda")
+2. get(dataset_id="...", include_data=true, format="csv")
 ```
 
-### Ejemplo 2: Encontrar datasets similares
+### Ejemplo 2: Busqueda semantica de datos
 ```
-1. search_datasets(semantic_query="datos de desempleo juvenil")
-2. get_related_datasets(dataset_id="...", top_k=5, min_score=0.6)
-```
-
-### Ejemplo 3: Busqueda multi-tema con exportacion
-```
-1. search_datasets(themes=["economia", "empleo"], fetch_all=true, max_results=100)
-2. export_results(search_results="...", format="json")
+1. search(query="datos de desempleo juvenil en Madrid")
+   -> Usa IA para encontrar datasets relevantes
 ```
 
-### Ejemplo 4: Monitorizar uso de herramientas
+### Ejemplo 3: Busqueda multi-tema
 ```
-1. get_usage_stats(include_searches=true)
-2. clear_usage_stats()  # Para reiniciar metricas
+1. search(themes=["economia", "empleo"], fetch_all=true, max_results=100)
+```
+
+### Ejemplo 4: Obtener estadisticas del INE
+```
+1. ine_search(query="empleo")  -> Encontrar operacion (ej: EPA, id=30308)
+2. ine_search(operation_id="30308")  -> Listar tablas
+3. ine_download(table_id="4247", n_last=12)  -> Descargar datos
 ```
 """
 
     search_tools = """
-### Herramientas de Busqueda (search_datasets)
+### Herramientas de Busqueda
 
-**search_datasets** - Busqueda unificada de datasets
+**search** - Busqueda unificada de datasets
+- `query`: Busqueda en lenguaje natural (usa IA)
 - `title`: Buscar en titulos
 - `keyword`: Buscar por palabra clave
 - `theme` / `themes`: Filtrar por tematica(s)
-- `publisher`: Filtrar por publicador
+- `publisher`: Filtrar por publicador (IDs en instrucciones del servidor)
 - `format`: Filtrar por formato (csv, json, xml)
-- `spatial_type` + `spatial_value`: Filtrar por ubicacion
-- `semantic_query`: Busqueda por significado con IA
 - `fetch_all`: Obtener todos los resultados (paginacion automatica)
 - `include_preview`: Incluir vista previa de datos
 
-**get_dataset** - Obtener detalles de un dataset especifico
+**get** - Obtener dataset con opcion de descarga
 - `dataset_id`: ID del dataset
-- `lang`: Idioma preferido (es, en, ca, eu, gl)
-
-**get_distributions** - Obtener archivos descargables
-- `dataset_id`: ID del dataset (opcional)
-- `format`: Filtrar por formato
-
-**download_data** - Descargar datos completos (hasta 50MB)
-- `dataset_id`: ID del dataset
-- `format`: Formato preferido
+- `include_data`: Si true, descarga datos (default: false)
+- `format`: Formato preferido cuando include_data=true
 - `max_rows`: Limite de filas
-- `max_mb`: Limite de tamano
-
-**get_related_datasets** - Encontrar datasets similares con IA
-- `dataset_id`: Dataset de referencia
-- `top_k`: Numero maximo de resultados
-- `min_score`: Puntuacion minima de similitud
-"""
-
-    metadata_tools = """
-### Herramientas de Metadatos
-
-**list_publishers** - Listar organismos publicadores
-- `page`: Numero de pagina
-- `use_cache`: Usar cache local (24h)
-
-**list_themes** - Listar categorias tematicas
-- `page`: Numero de pagina
-- `use_cache`: Usar cache local
-
-**list_provinces** - Listar provincias espanolas
-**list_autonomous_regions** - Listar Comunidades Autonomas
-**list_public_sectors** - Listar sectores publicos
-
-**refresh_metadata_cache** - Refrescar cache de metadatos
+- `max_mb`: Limite de tamano (default 10, max 50)
+- `lang`: Idioma preferido (es, en, ca, eu, gl)
 """
 
     external_tools = """
 ### Integraciones Externas
 
 #### INE (Instituto Nacional de Estadistica)
-- `ine_list_operations`: Listar operaciones estadisticas
-- `ine_search_operations`: Buscar operaciones
-- `ine_list_tables`: Listar tablas de una operacion
-- `ine_get_data`: Obtener datos de una tabla
+- `ine_search`: Buscar operaciones o listar tablas
+  - `query`: Buscar operaciones (empleo, IPC, poblacion...)
+  - `operation_id`: Si se indica, lista tablas de esa operacion
+- `ine_download`: Descargar datos de una tabla
+  - `table_id`: ID de tabla
+  - `n_last`: Ultimos N periodos (default 10)
 
 #### AEMET (Meteorologia)
-- `aemet_list_stations`: Listar estaciones meteorologicas
-- `aemet_list_municipalities`: Listar municipios
-- `aemet_get_observations`: Obtener observaciones
-- `aemet_get_forecast`: Obtener prediccion
+- `aemet_list_locations`: Listar municipios y/o estaciones
+  - `location_type`: 'municipalities', 'stations', o 'all'
+- `aemet_get_forecast`: Prediccion para un municipio
+  - `municipality_code`: Codigo de 5 digitos (ej: 28079 Madrid)
+- `aemet_get_observations`: Observaciones actuales
+  - `station_id`: ID de estacion (opcional)
 
 #### BOE (Boletin Oficial del Estado)
-- `boe_get_today`: Sumario de hoy
-- `boe_get_summary`: Sumario de una fecha
+- `boe_get_summary`: Sumario del BOE
+  - `date`: Fecha YYYYMMDD (o None para el mas reciente)
 - `boe_get_document`: Obtener documento por ID
+  - `document_id`: ID del documento (ej: BOE-A-2024-12345)
 - `boe_search`: Buscar documentos
-"""
-
-    utility_tools = """
-### Herramientas de Utilidad
-
-**export_results** - Exportar resultados a CSV/JSON
-- `search_results`: JSON de busqueda previa
-- `format`: 'csv' o 'json'
-- `include_preview`: Incluir columnas de preview
-
-**get_usage_stats** - Ver estadisticas de uso
-- `include_searches`: Incluir consultas recientes
-
-**clear_usage_stats** - Limpiar estadisticas de uso
+  - `query`: Texto de busqueda
+  - `date_from`, `date_to`: Rango de fechas
 """
 
     # Build content based on category
     if tool_category == "search":
         tools_content = search_tools
-    elif tool_category == "metadata":
-        tools_content = metadata_tools
     elif tool_category == "external":
         tools_content = external_tools
-    elif tool_category == "utilities":
-        tools_content = utility_tools
     else:
-        tools_content = search_tools + metadata_tools + external_tools + utility_tools
+        tools_content = search_tools + external_tools
 
     return f"""# Guia de Herramientas MCP - datos.gob.es
 
 ## Descripcion General
 
 Este servidor MCP proporciona acceso al catalogo de datos abiertos de Espana
-(datos.gob.es) con 32 herramientas organizadas en categorias:
+(datos.gob.es) con herramientas organizadas en categorias:
 
-- **Busqueda**: Buscar y explorar datasets
-- **Metadatos**: Listas de publicadores, temas, regiones
-- **Externas**: INE, AEMET, BOE
-- **Utilidades**: Exportar, metricas de uso
+- **Busqueda**: Buscar y descargar datasets (search, get)
+- **INE**: Estadisticas oficiales de Espana
+- **AEMET**: Datos meteorologicos
+- **BOE**: Legislacion y normativa
 
 ## Herramientas Disponibles
 {tools_content}
 {examples_section}
 ## Recursos MCP Disponibles
 
-### Recursos Estaticos (acceso directo)
-- `catalog://themes` - Todas las tematicas
-- `catalog://publishers` - Todos los publicadores
-- `catalog://provinces` - Provincias espanolas
-- `catalog://autonomous-regions` - Comunidades Autonomas
-
-### Resource Templates (dinamicos)
+### Resource Templates (acceso directo por URI)
 - `dataset://{{id}}` - Info de un dataset
 - `theme://{{id}}` - Datasets de una tematica
 - `publisher://{{id}}` - Datasets de un publicador
 - `format://{{id}}` - Datasets en un formato
 - `keyword://{{palabra}}` - Datasets con palabra clave
 
+## Referencia Rapida de IDs
+
+### Temas (usar con theme=)
+economia, hacienda, educacion, salud, medio-ambiente, transporte,
+turismo, empleo, sector-publico, ciencia-tecnologia, cultura-ocio,
+urbanismo-infraestructuras, energia
+
+### Publicadores principales (usar con publisher=)
+- EA0010587: INE
+- E05024401: Min. Hacienda
+- E00003901: AEMET
+- L01280796: Ayto. Madrid
+- L01080193: Ayto. Barcelona
+
 ## Consejos de Uso
 
-1. **Usa cache**: Los metadatos se cachean 24h. Segunda llamada es instantanea.
-2. **Busqueda semantica**: Primera vez tarda 30-60s en construir indice.
-3. **Paginacion paralela**: `fetch_all=true` es 5x mas rapido.
-4. **Multi-tema**: Usa `themes=["economia", "empleo"]` para buscar en varios.
-5. **Exportar**: Guarda resultados con `export_results` para analisis posterior.
-6. **Metricas**: Usa `get_usage_stats` para ver que herramientas usas mas.
+1. **Busqueda semantica**: Usa `query` para busquedas en lenguaje natural.
+2. **Descarga integrada**: `get(id, include_data=true)` en una sola llamada.
+3. **Multi-tema**: Usa `themes=["economia", "empleo"]` para buscar en varios.
+4. **INE paso a paso**: ine_search(query) -> ine_search(operation_id) -> ine_download(table_id)
 """

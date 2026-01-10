@@ -126,45 +126,58 @@ def register_ine_tools(mcp):
     """Register INE tools with the MCP server."""
 
     @mcp.tool()
-    async def ine_list_operations(
+    async def ine_search(
         query: str | None = None,
+        operation_id: str | None = None,
         page: int = 0,
         page_size: int = DEFAULT_PAGE_SIZE,
     ) -> str:
-        """Search official Spanish statistics from INE (Instituto Nacional de Estadistica).
+        """Search INE statistical operations or list tables for an operation.
 
-        IMPORTANT: INE is Spain's PRIMARY source for official statistics. Use this tool
-        when users ask about Spanish statistics, demographic data, economic indicators,
-        employment data, population, prices (IPC/CPI), GDP, surveys, censuses, etc.
+        INE is Spain's PRIMARY source for official statistics: demographics, economy,
+        employment, prices (IPC/CPI), GDP, surveys, censuses, etc.
 
-        The INE provides official data on:
-        - Demographics: population, births, deaths, migrations, census
-        - Economy: GDP, industrial production, business statistics, trade
-        - Employment: EPA (labor force survey), unemployment, salaries, working conditions
-        - Prices: IPC (consumer prices), IPRI (industrial prices), housing prices
-        - Society: education, health, living conditions, tourism
-        - Agriculture, environment, science and technology
+        Usage:
+            - ine_search(query='empleo') → List operations matching 'empleo'
+            - ine_search(operation_id='30308') → List tables for operation 30308 (EPA)
 
         Args:
-            query: Search text to filter operations (e.g., 'empleo', 'poblacion', 'IPC',
-                   'paro', 'turismo', 'censo'). If None, lists all ~600 operations.
+            query: Search text to filter operations (e.g., 'empleo', 'poblacion', 'IPC').
+            operation_id: If provided, lists tables for this operation instead of searching.
             page: Page number starting from 0.
             page_size: Results per page (default 50, max 100).
 
         Returns:
-            JSON with statistical operations. Use operation IDs with ine_list_tables.
+            JSON with operations (if query) or tables (if operation_id).
 
         Examples:
-            ine_list_operations(query='empleo') -> Employment statistics (EPA, etc.)
-            ine_list_operations(query='poblacion') -> Population and demographic data
-            ine_list_operations(query='IPC') -> Consumer Price Index (inflation)
-            ine_list_operations(query='turismo') -> Tourism statistics
-            ine_list_operations(query='PIB') -> GDP and national accounts
+            ine_search(query='empleo') → Employment statistics (EPA, etc.)
+            ine_search(query='IPC') → Consumer Price Index
+            ine_search(operation_id='30308') → Tables for EPA operation
         """
         try:
+            # If operation_id provided, list tables for that operation
+            if operation_id:
+                tables = await ine_client.list_tables(operation_id)
+                output = {
+                    "operation_id": operation_id,
+                    "total_tables": len(tables),
+                    "tables": [
+                        {
+                            "id": t.get("Id"),
+                            "name": t.get("Nombre"),
+                            "code": t.get("Codigo"),
+                            "period": t.get("T3_Periodo"),
+                            "publication": t.get("T3_Publicacion"),
+                        }
+                        for t in tables[:INE_MAX_TABLES]
+                    ],
+                }
+                return json.dumps(output, ensure_ascii=False, indent=2)
+
+            # Otherwise, search/list operations
             all_operations = await ine_client.list_operations()
 
-            # Filter by query if provided
             if query:
                 query_lower = query.lower()
                 all_operations = [
@@ -172,7 +185,6 @@ def register_ine_tools(mcp):
                     if query_lower in op.get("Nombre", "").lower()
                 ]
 
-            # Apply pagination
             page_size = min(max(1, page_size), 100)
             start = page * page_size
             end = start + page_size
@@ -196,77 +208,34 @@ def register_ine_tools(mcp):
             }
             return json.dumps(output, ensure_ascii=False, indent=2)
         except Exception as e:
-            return _handle_error(e, context="ine_list_operations")
+            return _handle_error(e, context="ine_search")
 
     @mcp.tool()
-    async def ine_list_tables(operation_id: str) -> str:
-        """List available data tables for an INE statistical operation.
-
-        After finding an operation with ine_list_operations, use this tool to see
-        what specific data tables are available. Each table contains actual
-        statistical data that can be retrieved with ine_get_data.
-
-        Args:
-            operation_id: Operation ID from ine_list_operations (e.g., '30308' for EPA).
-
-        Returns:
-            JSON with tables including ID, name, time period, and publication date.
-
-        Example workflow:
-            1. ine_list_operations(query='empleo') -> Find EPA operation (ID: 30308)
-            2. ine_list_tables('30308') -> List available EPA tables
-            3. ine_get_data(table_id) -> Get actual employment data
-        """
-        try:
-            tables = await ine_client.list_tables(operation_id)
-            output = {
-                "operation_id": operation_id,
-                "total_tables": len(tables),
-                "tables": [
-                    {
-                        "id": t.get("Id"),
-                        "name": t.get("Nombre"),
-                        "code": t.get("Codigo"),
-                        "period": t.get("T3_Periodo"),
-                        "publication": t.get("T3_Publicacion"),
-                    }
-                    for t in tables[:INE_MAX_TABLES]  # Limit results
-                ],
-            }
-            return json.dumps(output, ensure_ascii=False, indent=2)
-        except Exception as e:
-            return _handle_error(e)
-
-    @mcp.tool()
-    async def ine_get_data(
+    async def ine_download(
         table_id: str,
         n_last: int = INE_DEFAULT_NLAST,
     ) -> str:
-        """Retrieve actual statistical data from an INE table.
+        """Download statistical data from an INE table.
 
-        This is the final step to get real data values from INE. After finding
-        an operation and its tables, use this tool to retrieve the actual
-        statistics (numbers, percentages, indices, etc.).
+        After finding a table with ine_search(operation_id=...), use this to get
+        the actual statistics (numbers, percentages, indices).
 
         Args:
-            table_id: Table ID from ine_list_tables.
+            table_id: Table ID from ine_search.
             n_last: Number of recent time periods to retrieve (default 10, max 100).
-                    For monthly data, 10 = last 10 months.
-                    For quarterly data, 10 = last 10 quarters.
 
         Returns:
             JSON with statistical data including values, dates, units, and metadata.
 
         Example:
-            ine_get_data('4247', n_last=12) -> Last 12 periods of unemployment rate
+            ine_download('4247', n_last=12) → Last 12 periods of unemployment rate
         """
         try:
-            n_last = min(max(1, n_last), 100)  # Limit between 1-100
+            n_last = min(max(1, n_last), 100)
             data = await ine_client.get_table_data(table_id, n_last=n_last)
 
-            # Process data for cleaner output
             processed = []
-            for item in data[:INE_MAX_DATA_RECORDS]:  # Limit records
+            for item in data[:INE_MAX_DATA_RECORDS]:
                 processed.append({
                     "name": item.get("Nombre"),
                     "value": item.get("Valor"),

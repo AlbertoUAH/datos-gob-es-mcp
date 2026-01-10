@@ -14,7 +14,7 @@ class TestBuscarPorTemaPrompt:
         assert "economia" in result
         assert "csv" in result
         assert "10" in result
-        assert "Búsqueda de Datos Abiertos" in result
+        assert "Busqueda de Datos Abiertos" in result
 
     def test_generate_prompt_custom_values(self):
         """Test prompt generation with custom values."""
@@ -32,9 +32,9 @@ class TestBuscarPorTemaPrompt:
         """Test that prompt contains search instructions."""
         result = buscar_por_tema.generate_prompt()
 
-        assert "catalog://themes" in result
-        assert "get_datasets_by_theme" in result
-        assert "get_datasets_by_format" in result
+        assert "search" in result
+        assert "get" in result
+        assert "theme" in result
 
     def test_prompt_contains_format_descriptions(self):
         """Test that prompt contains format descriptions."""

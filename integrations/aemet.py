@@ -197,7 +197,7 @@ def register_aemet_tools(mcp):
 
         Args:
             municipality_code: 5-digit municipality code (e.g., '28079' for Madrid,
-                '08019' for Barcelona, '41091' for Sevilla). Use aemet_list_municipalities
+                '08019' for Barcelona, '41091' for Sevilla). Use aemet_list_locations
                 to find codes.
 
         Returns:
@@ -253,65 +253,54 @@ def register_aemet_tools(mcp):
             return _handle_error(e)
 
     @mcp.tool()
-    async def aemet_list_stations() -> str:
-        """List all AEMET weather observation stations.
+    async def aemet_list_locations(location_type: str = "all") -> str:
+        """List AEMET locations: municipalities for forecasts or stations for observations.
 
-        Get the complete list of meteorological stations in Spain.
-        Use station IDs to get specific observations.
-
-        Returns:
-            JSON with station list including ID, name, province, and coordinates.
-        """
-        try:
-            stations = await aemet_client.get_stations()
-
-            formatted = [
-                {
-                    "id": s.get("indicativo"),
-                    "nombre": s.get("nombre"),
-                    "provincia": s.get("provincia"),
-                    "altitud": s.get("altitud"),
-                    "latitud": s.get("latitud"),
-                    "longitud": s.get("longitud"),
-                }
-                for s in stations
-            ]
-
-            output = {
-                "total_stations": len(formatted),
-                "stations": formatted,
-            }
-            return json.dumps(output, ensure_ascii=False, indent=2)
-        except Exception as e:
-            return _handle_error(e)
-
-    @mcp.tool()
-    async def aemet_list_municipalities() -> str:
-        """List all municipalities with AEMET weather data.
-
-        Get the list of Spanish municipalities that have weather forecasts available.
-        Use the municipality codes to get forecasts.
+        Args:
+            location_type: Type of locations to list:
+                - 'municipalities': List municipalities (use codes with aemet_get_forecast)
+                - 'stations': List observation stations (use IDs with aemet_get_observations)
+                - 'all': List both (default)
 
         Returns:
-            JSON with municipalities including code, name, and province.
+            JSON with locations. Use municipality codes for forecasts, station IDs for observations.
         """
         try:
-            municipalities = await aemet_client.get_municipalities()
+            output = {}
 
-            formatted = [
-                {
-                    "codigo": m.get("id"),
-                    "nombre": m.get("nombre"),
-                    "provincia": m.get("id", "")[:2] if m.get("id") else None,  # First 2 digits = province
+            if location_type in ("municipalities", "all"):
+                municipalities = await aemet_client.get_municipalities()
+                output["municipalities"] = {
+                    "total": len(municipalities),
+                    "items": [
+                        {
+                            "codigo": m.get("id"),
+                            "nombre": m.get("nombre"),
+                            "provincia": m.get("id", "")[:2] if m.get("id") else None,
+                        }
+                        for m in municipalities[:AEMET_MAX_MUNICIPALITIES]
+                    ],
                 }
-                for m in municipalities[:AEMET_MAX_MUNICIPALITIES]  # Limit municipalities
-            ]
 
-            output = {
-                "total_municipalities": len(municipalities),
-                "showing": len(formatted),
-                "municipalities": formatted,
-            }
+            if location_type in ("stations", "all"):
+                stations = await aemet_client.get_stations()
+                output["stations"] = {
+                    "total": len(stations),
+                    "items": [
+                        {
+                            "id": s.get("indicativo"),
+                            "nombre": s.get("nombre"),
+                            "provincia": s.get("provincia"),
+                        }
+                        for s in stations
+                    ],
+                }
+
+            if not output:
+                return json.dumps({
+                    "error": f"Invalid location_type: {location_type}. Use 'municipalities', 'stations', or 'all'."
+                }, ensure_ascii=False)
+
             return json.dumps(output, ensure_ascii=False, indent=2)
         except Exception as e:
             return _handle_error(e)

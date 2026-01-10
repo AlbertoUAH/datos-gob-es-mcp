@@ -1,9 +1,9 @@
-"""Prompt para búsqueda guiada de datasets por temática y formato."""
+"""Prompt para busqueda guiada de datasets por tematica y formato."""
 
 PROMPT_NAME = "buscar_datos_por_tema"
-PROMPT_DESCRIPTION = """Búsqueda guiada de datasets por temática y formato.
+PROMPT_DESCRIPTION = """Busqueda guiada de datasets por tematica y formato.
 
-Este prompt te guía para encontrar datasets de una temática específica
+Este prompt te guia para encontrar datasets de una tematica especifica
 disponibles en un formato determinado."""
 
 
@@ -13,50 +13,54 @@ def generate_prompt(
     max_resultados: int = 10
 ) -> str:
     """
-    Genera el prompt de búsqueda por tema y formato.
+    Genera el prompt de busqueda por tema y formato.
 
     Args:
-        tema: Temática a buscar (economia, salud, educacion, etc.)
+        tema: Tematica a buscar (economia, salud, educacion, etc.)
         formato: Formato deseado (csv, json, xml, xlsx, rdf)
-        max_resultados: Número máximo de resultados a mostrar
+        max_resultados: Numero maximo de resultados a mostrar
     """
-    return f"""# Búsqueda de Datos Abiertos por Temática
+    return f"""# Busqueda de Datos Abiertos por Tematica
 
 ## Objetivo
 Encontrar datasets del portal datos.gob.es sobre **{tema}** disponibles en formato **{formato}**.
 
-## Instrucciones de Búsqueda
+## Instrucciones de Busqueda
 
-### Paso 1: Verificar la temática
-Primero, consulta el recurso `catalog://themes` para verificar que "{tema}" es una temática válida.
-Las temáticas principales son: economia, hacienda, educacion, salud, medio-ambiente, transporte, turismo, empleo, sector-publico, ciencia-tecnologia.
+### Paso 1: Verificar la tematica
+Las tematicas validas son: economia, hacienda, educacion, salud, medio-ambiente,
+transporte, turismo, empleo, sector-publico, ciencia-tecnologia, cultura-ocio,
+urbanismo-infraestructuras, energia.
 
-### Paso 2: Buscar datasets por tema
-Usa la herramienta `get_datasets_by_theme` con:
-- theme_id: "{tema}"
-- page_size: {max_resultados}
+### Paso 2: Buscar datasets por tema y formato
+Usa la herramienta `search` con:
+- theme: "{tema}"
+- format: "{formato}"
+- max_results: {max_resultados}
 
-### Paso 3: Filtrar por formato
-De los resultados obtenidos, usa `get_datasets_by_format` con:
-- format_id: "{formato}"
+Ejemplo: `search(theme="{tema}", format="{formato}", max_results={max_resultados})`
 
-### Paso 4: Obtener detalles
-Para cada dataset interesante, usa el recurso `dataset://{{dataset_id}}` para obtener información completa incluyendo URLs de descarga.
+### Paso 3: Obtener detalles
+Para cada dataset interesante, usa `get(dataset_id)` para obtener informacion
+completa incluyendo URLs de descarga.
+
+Para descargar datos directamente: `get(dataset_id, include_data=true)`
 
 ## Formatos Disponibles
-- csv: Valores separados por comas (ideal para análisis)
+- csv: Valores separados por comas (ideal para analisis)
 - json: JavaScript Object Notation (ideal para APIs)
 - xml: Extensible Markup Language
 - xlsx: Microsoft Excel
 - rdf: Resource Description Framework (datos enlazados)
 
-## Criterios de Evaluación de Datasets
+## Criterios de Evaluacion de Datasets
 Al presentar los resultados, incluye:
-1. Título y descripción del dataset
+1. Titulo y descripcion del dataset
 2. Organismo publicador
-3. Fecha de última actualización
+3. Fecha de ultima actualizacion
 4. Formatos disponibles
 5. URL de acceso a los datos
 
 ## Resultado Esperado
-Presenta una lista de hasta {max_resultados} datasets sobre {tema} en formato {formato}, ordenados por fecha de modificación (más recientes primero)."""
+Presenta una lista de hasta {max_resultados} datasets sobre {tema} en formato {formato},
+ordenados por fecha de modificacion (mas recientes primero)."""

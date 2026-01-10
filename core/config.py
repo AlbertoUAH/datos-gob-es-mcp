@@ -129,4 +129,4 @@ HTTP2_ENABLED = _get_bool("HTTP2_ENABLED", True)
 # Embeddings Performance
 # =============================================================================
 EMBEDDINGS_BATCH_SIZE = _get_int("EMBEDDINGS_BATCH_SIZE", 32)
-PRELOAD_EMBEDDINGS_MODEL = _get_bool("PRELOAD_EMBEDDINGS_MODEL", False)
+PRELOAD_EMBEDDINGS_MODEL = _get_bool("PRELOAD_EMBEDDINGS_MODEL", True)

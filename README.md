@@ -74,6 +74,7 @@ cp .env.example .env
 | Variable | Requerida | Descripcion |
 |----------|-----------|-------------|
 | `AEMET_API_KEY` | Para meteorologia | API key de AEMET OpenData ([obtener gratis](https://opendata.aemet.es/centrodedescargas/altaUsuario)) |
+| `PRELOAD_EMBEDDINGS_MODEL` | No | Pre-cargar modelo de embeddings en startup (default: true) |
 | `LOG_LEVEL` | No | Nivel de logging: DEBUG, INFO, WARNING, ERROR (default: INFO) |
 | `LOG_FORMAT` | No | Formato de logs: console o json (default: console) |
 | `RATE_LIMIT_DATOS_GOB_ES` | No | Peticiones/segundo a datos.gob.es (default: 10) |
@@ -360,6 +361,9 @@ make lint          # Verificar codigo con ruff
 make format        # Formatear codigo con ruff
 make clean         # Limpiar archivos de cache
 make notebooks     # Iniciar servidor Jupyter
+
+# Benchmark de latencia
+python scripts/latency_benchmark.py
 ```
 
 ### Estructura del proyecto
@@ -370,15 +374,19 @@ datos-gob-es-mcp/
 ├── core/                     # Modulo central
 │   ├── logging.py           # Logging estructurado (structlog)
 │   ├── ratelimit.py         # Rate limiting (aiolimiter)
+│   ├── config.py            # Configuracion centralizada
 │   └── http.py              # Cliente HTTP centralizado
 ├── integrations/             # APIs externas
 │   ├── ine.py               # Instituto Nacional de Estadistica
 │   ├── aemet.py             # Agencia de Meteorologia
 │   └── boe.py               # Boletin Oficial del Estado
 ├── prompts/                  # Guias de busqueda MCP
+├── scripts/                  # Scripts de utilidad
+│   └── latency_benchmark.py # Benchmark de latencia
 ├── examples/                 # Jupyter notebooks de ejemplo
 ├── tests/                    # Tests automatizados
 ├── docs/                     # Documentacion adicional
+│   └── latency_report.md    # Informe de latencia
 ├── requirements.txt         # Dependencias Python
 ├── Makefile                 # Comandos de desarrollo
 └── README.md
@@ -386,14 +394,31 @@ datos-gob-es-mcp/
 
 ## Rendimiento
 
+### Latencia por herramienta
+
+| Tool | Latencia Promedio | Clasificacion |
+|------|-------------------|---------------|
+| `boe_get_summary` | 54 ms | 🟢 Rapido |
+| `get` (metadata) | 80 ms | 🟢 Rapido |
+| `search` (titulo) | 127 ms | 🟢 Rapido |
+| `boe_search` | 142 ms | 🟢 Rapido |
+| `search` (tema) | 174 ms | 🟢 Rapido |
+| `ine_download` | 197 ms | 🟢 Rapido |
+| `search` (keyword) | 805 ms | 🟡 Moderado |
+| `ine_search` | 1,368 ms | 🟡 Moderado |
+| `search` (semantica) | 125 ms* | 🟢 Rapido |
+
+\* Con `PRELOAD_EMBEDDINGS_MODEL=true` (habilitado por defecto). Ver [informe completo](docs/latency_report.md).
+
 ### Optimizaciones implementadas
 
 | Mejora | Descripcion | Impacto |
 |--------|-------------|---------|
+| **Pre-carga de embeddings** | Modelo ML se carga en startup | Busqueda semantica: 35s → 125ms |
 | **Cache de metadatos** | Publishers, themes, provincias y regiones se cachean 24h | Respuestas instantaneas en llamadas repetidas |
 | **Paginacion paralela** | `fetch_all=True` descarga 5 paginas en paralelo | ~5x mas rapido |
 | **Descarga integrada** | `get(id, include_data=true)` combina metadatos + datos | Una sola llamada |
-| **Embeddings cacheados** | Indice semantico se guarda en disco | Primera busqueda ~30s, siguientes <1s |
+| **HTTP/2** | Conexiones multiplexadas | Menor latencia en llamadas concurrentes |
 
 ## Licencia
 

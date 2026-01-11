@@ -181,28 +181,71 @@ def _format_summary(summary: dict[str, Any]) -> dict[str, Any]:
     # Extract sections from diario
     secciones = []
     for diario in diario_list:
-        for seccion in diario.get("seccion", []):
+        # Skip if diario is not a dict
+        if not isinstance(diario, dict):
+            continue
+
+        seccion_list = diario.get("seccion", [])
+        # Ensure seccion_list is a list
+        if isinstance(seccion_list, dict):
+            seccion_list = [seccion_list]
+        elif not isinstance(seccion_list, list):
+            continue
+
+        for seccion in seccion_list:
+            # Skip if seccion is not a dict
+            if not isinstance(seccion, dict):
+                continue
+
             seccion_info = {
                 "nombre": seccion.get("nombre"),
                 "departamentos": [],
             }
 
-            for dept in seccion.get("departamento", []):
+            dept_list = seccion.get("departamento", [])
+            # Ensure dept_list is a list
+            if isinstance(dept_list, dict):
+                dept_list = [dept_list]
+            elif not isinstance(dept_list, list):
+                continue
+
+            for dept in dept_list:
+                # Skip if dept is not a dict
+                if not isinstance(dept, dict):
+                    continue
+
                 dept_info = {
                     "nombre": dept.get("nombre"),
                     "documentos": [],
                 }
 
+                epigrafe_list = dept.get("epigrafe", [])
+                # Ensure epigrafe_list is a list
+                if isinstance(epigrafe_list, dict):
+                    epigrafe_list = [epigrafe_list]
+                elif not isinstance(epigrafe_list, list):
+                    continue
+
                 # Process epigrafes
-                for epigrafe in dept.get("epigrafe", []):
+                for epigrafe in epigrafe_list:
+                    # Skip if epigrafe is not a dict
+                    if not isinstance(epigrafe, dict):
+                        continue
+
                     epigrafe_nombre = epigrafe.get("nombre", "")
                     items = epigrafe.get("item", [])
 
                     # item can be a single object or a list
                     if isinstance(items, dict):
                         items = [items]
+                    elif not isinstance(items, list):
+                        continue
 
                     for item in items:
+                        # Skip if item is not a dict
+                        if not isinstance(item, dict):
+                            continue
+
                         dept_info["documentos"].append(
                             {
                                 "id": item.get("identificador"),

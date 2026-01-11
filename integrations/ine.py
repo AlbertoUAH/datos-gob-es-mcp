@@ -18,6 +18,73 @@ from core.config import (
 
 logger = get_logger("ine")
 
+# =============================================================================
+# SYNONYMS FOR BETTER SEARCH - Maps common terms to related search terms
+# =============================================================================
+INE_SYNONYMS: dict[str, list[str]] = {
+    # Employment / Labor market
+    "empleo": ["poblacion activa", "ocupacion", "trabajo", "EPA", "laboral"],
+    "trabajo": ["poblacion activa", "ocupacion", "empleo", "EPA", "laboral"],
+    "paro": ["desempleo", "parados", "poblacion activa"],
+    "desempleo": ["paro", "parados", "poblacion activa"],
+    # Prices / Inflation
+    "precios": ["IPC", "inflacion", "consumo"],
+    "inflacion": ["IPC", "precios", "consumo"],
+    "ipc": ["precios", "inflacion", "consumo"],
+    # Economy
+    "pib": ["producto interior bruto", "PIB", "economia", "crecimiento"],
+    "economia": ["PIB", "producto interior", "crecimiento", "contabilidad nacional"],
+    # Demographics
+    "nacimientos": ["natalidad", "demografica", "movimiento natural"],
+    "muertes": ["mortalidad", "defunciones", "demografica"],
+    "mortalidad": ["defunciones", "muertes", "demografica"],
+    "natalidad": ["nacimientos", "demografica"],
+    # Housing
+    "vivienda": ["hipoteca", "alquiler", "inmobiliario"],
+    "hipoteca": ["vivienda", "inmobiliario"],
+    "alquiler": ["vivienda", "arrendamiento"],
+    # Tourism
+    "turismo": ["turistas", "hotelera", "viajeros"],
+    "turistas": ["turismo", "hotelera", "viajeros"],
+    # Trade
+    "comercio": ["exportaciones", "importaciones", "exterior"],
+    "exportaciones": ["comercio exterior", "importaciones"],
+    "importaciones": ["comercio exterior", "exportaciones"],
+}
+
+
+def _expand_query_with_synonyms(query: str) -> list[str]:
+    """Expand query with synonyms for better search coverage.
+
+    Args:
+        query: Original search query.
+
+    Returns:
+        List of search terms including original and synonyms.
+    """
+    query_lower = query.lower().strip()
+    terms = [query_lower]
+
+    # Check each word in the query for synonyms
+    words = query_lower.split()
+    for word in words:
+        if word in INE_SYNONYMS:
+            terms.extend(INE_SYNONYMS[word])
+
+    # Check the full query as well
+    if query_lower in INE_SYNONYMS:
+        terms.extend(INE_SYNONYMS[query_lower])
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_terms = []
+    for term in terms:
+        if term not in seen:
+            seen.add(term)
+            unique_terms.append(term)
+
+    return unique_terms
+
 
 class INEClient(BaseAPIClient):
     """Async HTTP client for the INE API.
@@ -209,17 +276,31 @@ def register_ine_tools(mcp):
             all_operations = await ine_client.list_operations()
 
             if query:
-                query_lower = query.lower()
-                all_operations = [
-                    op for op in all_operations if query_lower in op.get("Nombre", "").lower()
-                ]
+                # Expand query with synonyms for better coverage
+                search_terms = _expand_query_with_synonyms(query)
+
+                # Filter operations that match any of the search terms
+                matching_ops = []
+                seen_ids = set()
+                for op in all_operations:
+                    op_name = op.get("Nombre", "").lower()
+                    op_id = op.get("Id")
+                    if op_id in seen_ids:
+                        continue
+                    for term in search_terms:
+                        if term in op_name:
+                            matching_ops.append(op)
+                            seen_ids.add(op_id)
+                            break
+                all_operations = matching_ops
 
             page_size = min(max(1, page_size), 100)
             start = page * page_size
             end = start + page_size
             paginated = all_operations[start:end]
 
-            output = {
+            # Include search terms in output if synonyms were expanded
+            output: dict[str, Any] = {
                 "query": query,
                 "total_operations": len(all_operations),
                 "page": page,
@@ -238,6 +319,11 @@ def register_ine_tools(mcp):
                     for op in paginated
                 ],
             }
+            # Show expanded search terms if synonyms were used
+            if query:
+                search_terms = _expand_query_with_synonyms(query)
+                if len(search_terms) > 1:
+                    output["search_terms_expanded"] = search_terms
             return json.dumps(output, ensure_ascii=False, indent=2)
         except Exception as e:
             return _handle_error(e, context="ine_search")

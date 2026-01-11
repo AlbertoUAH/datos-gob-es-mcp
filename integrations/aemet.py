@@ -8,6 +8,7 @@ Requires free API key from: https://opendata.aemet.es/centrodedescargas/altaUsua
 
 import json
 import os
+import time
 from typing import Any
 
 from dotenv import load_dotenv
@@ -25,6 +26,13 @@ from core.config import (
 load_dotenv()
 
 logger = get_logger("aemet")
+
+# =============================================================================
+# MUNICIPALITIES CACHE - Avoid repeated API calls for static data
+# =============================================================================
+_municipalities_cache: list[dict[str, Any]] | None = None
+_municipalities_cache_time: float = 0
+_MUNICIPALITIES_CACHE_TTL = 24 * 60 * 60  # 24 hours in seconds
 
 
 class AEMETClient:
@@ -195,11 +203,79 @@ def _format_forecast(forecast_data: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _normalize_name(name: str) -> str:
+    """Normalize municipality name for matching (remove accents, lowercase)."""
+    import unicodedata
+
+    normalized = unicodedata.normalize("NFD", name.lower())
+    return "".join(c for c in normalized if unicodedata.category(c) != "Mn")
+
+
+async def _get_municipalities_cached() -> list[dict[str, Any]]:
+    """Get municipalities list with caching to avoid rate limits.
+
+    The municipalities list is static data that rarely changes,
+    so we cache it for 24 hours to minimize API calls.
+    """
+    global _municipalities_cache, _municipalities_cache_time
+
+    current_time = time.time()
+
+    # Check if cache is valid
+    if (
+        _municipalities_cache is not None
+        and (current_time - _municipalities_cache_time) < _MUNICIPALITIES_CACHE_TTL
+    ):
+        logger.debug("municipalities_cache_hit", cached_count=len(_municipalities_cache))
+        return _municipalities_cache
+
+    # Fetch from API and cache
+    logger.info("municipalities_cache_miss", reason="expired_or_empty")
+    municipalities = await aemet_client.get_municipalities()
+    _municipalities_cache = municipalities
+    _municipalities_cache_time = current_time
+    logger.info("municipalities_cached", count=len(municipalities))
+
+    return municipalities
+
+
+async def _find_municipality_by_name(name: str) -> dict[str, Any] | None:
+    """Search for a municipality by name.
+
+    Uses cached municipalities list to avoid rate limits.
+
+    Args:
+        name: Municipality name to search (e.g., 'Madrid', 'Sevilla').
+
+    Returns:
+        Best matching municipality dict or None if not found.
+    """
+    municipalities = await _get_municipalities_cached()
+    name_normalized = _normalize_name(name)
+
+    # First try exact match
+    for m in municipalities:
+        if _normalize_name(m.get("nombre", "")) == name_normalized:
+            return m
+
+    # Then try partial match (name starts with search term)
+    for m in municipalities:
+        if _normalize_name(m.get("nombre", "")).startswith(name_normalized):
+            return m
+
+    # Then try contains match
+    for m in municipalities:
+        if name_normalized in _normalize_name(m.get("nombre", "")):
+            return m
+
+    return None
+
+
 def register_aemet_tools(mcp):
     """Register AEMET tools with the MCP server."""
 
     @mcp.tool()
-    async def aemet_get_forecast(municipality_code: str) -> str:
+    async def aemet_get_forecast(location: str) -> str:
         """Get weather forecast for a Spanish municipality.
 
         Retrieve the daily weather forecast for any Spanish municipality.
@@ -208,14 +284,44 @@ def register_aemet_tools(mcp):
         Requires AEMET_API_KEY environment variable (free from AEMET OpenData).
 
         Args:
-            municipality_code: 5-digit municipality code (e.g., '28079' for Madrid,
-                '08019' for Barcelona, '41091' for Sevilla). Use aemet_list_locations
-                to find codes.
+            location: Municipality name (e.g., 'Madrid', 'Barcelona', 'Sevilla')
+                OR 5-digit municipality code (e.g., '28079' for Madrid).
+                Names are matched automatically - no need to look up codes first!
 
         Returns:
             JSON with 7-day forecast including temperatures, precipitation, and conditions.
+
+        Examples:
+            aemet_get_forecast('Madrid') -> Forecast for Madrid
+            aemet_get_forecast('28079') -> Forecast for Madrid (by code)
+            aemet_get_forecast('Sevilla') -> Forecast for Sevilla
         """
         try:
+            municipality_code = location.strip()
+
+            # Check if it's a 5-digit code
+            if not (municipality_code.isdigit() and len(municipality_code) == 5):
+                # It's a name, search for the municipality
+                municipality = await _find_municipality_by_name(location)
+
+                if not municipality:
+                    return json.dumps(
+                        {
+                            "error": f"Municipio no encontrado: '{location}'",
+                            "sugerencia": "Use aemet_list_locations(location_type='municipalities') para ver la lista completa.",
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+
+                municipality_code = municipality.get("id")
+                logger.info(
+                    "municipality_resolved",
+                    name=location,
+                    resolved_name=municipality.get("nombre"),
+                    code=municipality_code,
+                )
+
             data = await aemet_client.get_forecast_daily(municipality_code)
             formatted = _format_forecast(data)
             return json.dumps(formatted, ensure_ascii=False, indent=2)
@@ -285,7 +391,7 @@ def register_aemet_tools(mcp):
             output = {}
 
             if location_type in ("municipalities", "all"):
-                municipalities = await aemet_client.get_municipalities()
+                municipalities = await _get_municipalities_cached()
                 output["municipalities"] = {
                     "total": len(municipalities),
                     "items": [

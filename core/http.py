@@ -1,5 +1,6 @@
-"""HTTP client with integrated logging, rate limiting, and connection pooling."""
+"""HTTP client with integrated logging, rate limiting, connection pooling, and retry."""
 
+import asyncio
 import time
 from typing import Any, ClassVar
 
@@ -8,8 +9,12 @@ import httpx
 from .config import (
     HTTP2_ENABLED,
     HTTP_DEFAULT_TIMEOUT,
+    HTTP_MAX_RETRIES,
     HTTP_POOL_MAX_CONNECTIONS,
     HTTP_POOL_MAX_KEEPALIVE,
+    HTTP_RETRY_BACKOFF_FACTOR,
+    HTTP_RETRY_BACKOFF_INITIAL,
+    HTTP_RETRY_BACKOFF_MAX,
 )
 from .logging import get_logger
 from .ratelimit import RateLimiter
@@ -133,6 +138,25 @@ class HTTPClient:
         endpoint = endpoint.lstrip("/")
         return f"{self.base_url}/{endpoint}"
 
+    def _should_retry(self, status_code: int | None, exception: Exception | None) -> bool:
+        """Determine if a request should be retried.
+
+        Retries on:
+        - 5xx server errors (502, 503, 504, 500)
+        - Timeout exceptions
+        - Connection errors
+        """
+        if status_code is not None:
+            return status_code >= 500
+        if exception is not None:
+            return isinstance(exception, (httpx.TimeoutException, httpx.ConnectError))
+        return False
+
+    def _calculate_backoff(self, attempt: int) -> float:
+        """Calculate exponential backoff delay."""
+        delay = HTTP_RETRY_BACKOFF_INITIAL * (HTTP_RETRY_BACKOFF_FACTOR**attempt)
+        return min(delay, HTTP_RETRY_BACKOFF_MAX)
+
     async def request(
         self,
         method: str,
@@ -141,8 +165,9 @@ class HTTPClient:
         headers: dict[str, str] | None = None,
         json_data: dict[str, Any] | None = None,
         raise_for_status: bool = True,
+        max_retries: int | None = None,
     ) -> httpx.Response:
-        """Make an HTTP request with logging, rate limiting, and connection reuse.
+        """Make an HTTP request with logging, rate limiting, connection reuse, and retry.
 
         Args:
             method: HTTP method (GET, POST, etc.)
@@ -151,6 +176,7 @@ class HTTPClient:
             headers: Request headers
             json_data: JSON body data
             raise_for_status: Whether to raise exception on HTTP errors
+            max_retries: Override default max retries (None uses HTTP_MAX_RETRIES)
 
         Returns:
             httpx.Response object
@@ -159,79 +185,156 @@ class HTTPClient:
             HTTPClientError: On request failure or HTTP error (if raise_for_status=True)
         """
         url = self._build_url(endpoint)
+        retries = max_retries if max_retries is not None else HTTP_MAX_RETRIES
+        last_exception: Exception | None = None
 
-        # Apply rate limiting
-        if self.rate_limit:
-            await RateLimiter.acquire(self.api_name)
+        for attempt in range(retries + 1):
+            # Apply rate limiting
+            if self.rate_limit:
+                await RateLimiter.acquire(self.api_name)
 
-        # Log request start (DEBUG level to avoid noise)
-        logger.debug(
-            "request_start",
-            api=self.api_name,
-            method=method,
-            url=url,
-            params=params,
-        )
-
-        start_time = time.perf_counter()
-
-        try:
-            # Use connection pool instead of creating new client each time
-            response = await self._pool.request(
+            # Log request start (DEBUG level to avoid noise)
+            logger.debug(
+                "request_start",
+                api=self.api_name,
                 method=method,
                 url=url,
                 params=params,
-                headers=headers,
-                json=json_data,
+                attempt=attempt + 1,
             )
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            start_time = time.perf_counter()
 
-            # Log successful request
-            logger.info(
-                "request_complete",
-                api=self.api_name,
-                method=method,
-                url=url,
-                status=response.status_code,
-                duration_ms=round(duration_ms, 2),
-            )
+            try:
+                # Use connection pool instead of creating new client each time
+                response = await self._pool.request(
+                    method=method,
+                    url=url,
+                    params=params,
+                    headers=headers,
+                    json=json_data,
+                )
 
-            # Raise for HTTP errors if requested
-            if raise_for_status:
-                try:
-                    response.raise_for_status()
-                except httpx.HTTPStatusError as e:
-                    raise HTTPClientError(
-                        f"HTTP {e.response.status_code}: {e.response.text[:200]}",
-                        status_code=e.response.status_code,
-                    ) from e
+                duration_ms = (time.perf_counter() - start_time) * 1000
 
-            return response
+                # Check if we should retry on 5xx errors
+                if self._should_retry(response.status_code, None) and attempt < retries:
+                    backoff = self._calculate_backoff(attempt)
+                    logger.warning(
+                        "request_retry",
+                        api=self.api_name,
+                        method=method,
+                        url=url,
+                        status=response.status_code,
+                        attempt=attempt + 1,
+                        max_retries=retries,
+                        backoff_seconds=round(backoff, 2),
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
 
-        except httpx.TimeoutException as e:
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            logger.error(
-                "request_timeout",
-                api=self.api_name,
-                method=method,
-                url=url,
-                duration_ms=round(duration_ms, 2),
-                error=str(e),
-            )
-            raise HTTPClientError(f"Request timed out: {e}") from e
+                # Log successful request
+                logger.info(
+                    "request_complete",
+                    api=self.api_name,
+                    method=method,
+                    url=url,
+                    status=response.status_code,
+                    duration_ms=round(duration_ms, 2),
+                    attempts=attempt + 1,
+                )
 
-        except httpx.RequestError as e:
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            logger.error(
-                "request_failed",
-                api=self.api_name,
-                method=method,
-                url=url,
-                duration_ms=round(duration_ms, 2),
-                error=str(e),
-            )
-            raise HTTPClientError(f"Request failed: {e}") from e
+                # Raise for HTTP errors if requested
+                if raise_for_status:
+                    try:
+                        response.raise_for_status()
+                    except httpx.HTTPStatusError as e:
+                        raise HTTPClientError(
+                            f"HTTP {e.response.status_code}: {e.response.text[:200]}",
+                            status_code=e.response.status_code,
+                        ) from e
+
+                return response
+
+            except httpx.TimeoutException as e:
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                last_exception = e
+
+                if self._should_retry(None, e) and attempt < retries:
+                    backoff = self._calculate_backoff(attempt)
+                    logger.warning(
+                        "request_retry",
+                        api=self.api_name,
+                        method=method,
+                        url=url,
+                        error=str(e),
+                        attempt=attempt + 1,
+                        max_retries=retries,
+                        backoff_seconds=round(backoff, 2),
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+
+                logger.error(
+                    "request_timeout",
+                    api=self.api_name,
+                    method=method,
+                    url=url,
+                    duration_ms=round(duration_ms, 2),
+                    error=str(e),
+                    attempts=attempt + 1,
+                )
+                raise HTTPClientError(f"Request timed out after {attempt + 1} attempts: {e}") from e
+
+            except httpx.ConnectError as e:
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                last_exception = e
+
+                if self._should_retry(None, e) and attempt < retries:
+                    backoff = self._calculate_backoff(attempt)
+                    logger.warning(
+                        "request_retry",
+                        api=self.api_name,
+                        method=method,
+                        url=url,
+                        error=str(e),
+                        attempt=attempt + 1,
+                        max_retries=retries,
+                        backoff_seconds=round(backoff, 2),
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+
+                logger.error(
+                    "request_connect_error",
+                    api=self.api_name,
+                    method=method,
+                    url=url,
+                    duration_ms=round(duration_ms, 2),
+                    error=str(e),
+                    attempts=attempt + 1,
+                )
+                raise HTTPClientError(
+                    f"Connection failed after {attempt + 1} attempts: {e}"
+                ) from e
+
+            except httpx.RequestError as e:
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                logger.error(
+                    "request_failed",
+                    api=self.api_name,
+                    method=method,
+                    url=url,
+                    duration_ms=round(duration_ms, 2),
+                    error=str(e),
+                    attempts=attempt + 1,
+                )
+                raise HTTPClientError(f"Request failed: {e}") from e
+
+        # Should not reach here, but just in case
+        raise HTTPClientError(
+            f"Request failed after {retries + 1} attempts"
+        ) from last_exception
 
     async def get(
         self,

@@ -1,5 +1,7 @@
 """Core module for logging, rate limiting, HTTP client utilities, and configuration."""
 
+__version__ = "1.0.0"
+
 from .client import BaseAPIClient
 from .config import (
     AEMET_BASE_URL,
@@ -69,6 +71,8 @@ from .ratelimit import RateLimiter, RateLimitExceededError
 from .utils import FORMAT_MAPPINGS, extract_dict_value, extract_uri_suffix, normalize_format
 
 __all__ = [
+    # Version
+    "__version__",
     # Logging
     "setup_logging",
     "get_logger",

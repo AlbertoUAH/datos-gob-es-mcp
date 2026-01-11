@@ -1,6 +1,6 @@
 """Core module for logging, rate limiting, HTTP client utilities, and configuration."""
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 from .client import BaseAPIClient
 from .config import (

@@ -1,8 +1,10 @@
 # datos-gob-es-mcp
 
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/AlbertoUAH/datos-gob-es-mcp/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
+[![Tests](https://img.shields.io/badge/tests-25%20passed-brightgreen.svg)](docs/test_report.md)
 
 **Hub de OpenData Espanol** - Servidor MCP (Model Context Protocol) que unifica el acceso a las principales fuentes de datos abiertos de Espana en una sola interfaz.
 
@@ -28,6 +30,9 @@ Este servidor MCP actua como un **hub centralizado** que conecta multiples APIs 
 - **Cache de metadatos**: Cache local de 24h para respuestas instantaneas
 - **Paginacion paralela**: Descarga 5x mas rapida con `fetch_all=True`
 - **Descarga integrada**: `get(id, include_data=true)` en una sola llamada
+- **Busqueda AEMET por nombre**: Usa nombres de municipio directamente (ej: "Madrid")
+- **Retry automatico**: Reintentos con backoff exponencial para mayor resiliencia
+- **Sinonimos INE**: Expansion de consultas para mejores resultados
 - Cliente HTTP asincrono con rate limiting por API
 - Modelos Pydantic para tipado seguro
 - Listo para desplegar en FastMCP Cloud
@@ -207,7 +212,7 @@ El INE es la **fuente oficial principal** de estadisticas en Espana. Contiene da
 |-------------|-------------|
 | `aemet_list_locations` | Lista municipios y/o estaciones meteorologicas. Usa `location_type` para filtrar |
 | `aemet_get_observations` | Obtiene observaciones meteorologicas actuales de una estacion |
-| `aemet_get_forecast` | Obtiene la prediccion meteorologica para un municipio |
+| `aemet_get_forecast` | Obtiene la prediccion meteorologica para un municipio (acepta nombre o codigo) |
 
 ### BOE - Boletin Oficial del Estado (3 herramientas)
 
@@ -326,8 +331,13 @@ Asistente: [Usa boe_get_summary(date="20250102")]
 
 ```
 Usuario: Que tiempo hara manana en Madrid?
-Asistente: [Usa aemet_get_forecast(municipality_code="28079")]
+Asistente: [Usa aemet_get_forecast(location="Madrid")]
+
+Usuario: Que tiempo hara en Sevilla?
+Asistente: [Usa aemet_get_forecast(location="Sevilla")]
 ```
+
+Nota: `aemet_get_forecast` acepta tanto nombres de municipio como codigos (ej: "28079" para Madrid).
 
 ## Configuracion en Clientes MCP
 
@@ -416,9 +426,12 @@ datos-gob-es-mcp/
 |--------|-------------|---------|
 | **Pre-carga de embeddings** | Modelo ML se carga en startup | Busqueda semantica: 35s → 125ms |
 | **Cache de metadatos** | Publishers, themes, provincias y regiones se cachean 24h | Respuestas instantaneas en llamadas repetidas |
+| **Cache de municipios AEMET** | Lista de municipios cacheada 24h | Evita rate limits en busquedas por nombre |
 | **Paginacion paralela** | `fetch_all=True` descarga 5 paginas en paralelo | ~5x mas rapido |
 | **Descarga integrada** | `get(id, include_data=true)` combina metadatos + datos | Una sola llamada |
 | **HTTP/2** | Conexiones multiplexadas | Menor latencia en llamadas concurrentes |
+| **Retry con backoff** | Reintentos automaticos (max 3) con backoff exponencial | Mayor resiliencia ante errores transitorios |
+| **Sinonimos INE** | Expansion automatica de consultas con sinonimos | Mejores resultados de busqueda |
 
 ## Licencia
 

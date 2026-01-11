@@ -29,6 +29,39 @@ class INEClient(BaseAPIClient):
     API_NAME = "ine"
     ERROR_CLASS = INEClientError
 
+    async def _request(
+        self,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        """Make an HTTP request to INE API.
+
+        Overrides base to handle INE's quirk of returning empty responses
+        instead of empty arrays for endpoints with no data.
+        """
+        try:
+            response = await self.http.get(endpoint, params=params, headers=headers)
+            text = response.text.strip()
+
+            # INE returns empty body instead of [] for some endpoints
+            if not text:
+                logger.warning(
+                    "ine_empty_response",
+                    endpoint=endpoint,
+                    params=params,
+                )
+                return []
+
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            raise self.ERROR_CLASS(
+                f"Invalid JSON from INE API: {e}", status_code=None
+            ) from e
+        except Exception as e:
+            status_code = getattr(e, "status_code", None)
+            raise self.ERROR_CLASS(str(e), status_code=status_code) from e
+
     async def list_operations(self) -> list[dict[str, Any]]:
         """List all statistical operations available in INE."""
         return await self._request("ES/OPERACIONES_DISPONIBLES")
@@ -137,13 +170,18 @@ def register_ine_tools(mcp):
         INE is Spain's PRIMARY source for official statistics: demographics, economy,
         employment, prices (IPC/CPI), GDP, surveys, censuses, etc.
 
-        Usage:
-            - ine_search(query='empleo') → List operations matching 'empleo'
-            - ine_search(operation_id='30308') → List tables for operation 30308 (EPA)
+        IMPORTANT: Always search with 'query' FIRST to find valid operation IDs.
+        Only use 'operation_id' with IDs returned from a previous search.
+
+        Two-step workflow:
+            1. FIRST: ine_search(query='desempleo') → Find operations and their IDs
+            2. THEN: ine_search(operation_id='<id from step 1>') → Get tables for that operation
 
         Args:
-            query: Search text to filter operations (e.g., 'empleo', 'poblacion', 'IPC').
-            operation_id: If provided, lists tables for this operation instead of searching.
+            query: Search text to filter operations. USE THIS FIRST to find operations.
+                   Examples: 'empleo', 'paro', 'poblacion', 'IPC', 'PIB'.
+            operation_id: List tables for a specific operation. Only use IDs obtained
+                          from a previous search - do NOT guess or assume IDs.
             page: Page number starting from 0.
             page_size: Results per page (default 50, max 100).
 
@@ -151,9 +189,9 @@ def register_ine_tools(mcp):
             JSON with operations (if query) or tables (if operation_id).
 
         Examples:
-            ine_search(query='empleo') → Employment statistics (EPA, etc.)
-            ine_search(query='IPC') → Consumer Price Index
-            ine_search(operation_id='30308') → Tables for EPA operation
+            ine_search(query='paro') → Search for unemployment statistics
+            ine_search(query='poblacion') → Search for population statistics
+            ine_search(query='precios consumo') → Search for CPI/inflation data
         """
         try:
             # If operation_id provided, list tables for that operation
@@ -196,10 +234,11 @@ def register_ine_tools(mcp):
                 "page": page,
                 "page_size": page_size,
                 "total_pages": (len(all_operations) + page_size - 1) // page_size if all_operations else 0,
+                "hint": "Use 'operation_id' field value with ine_search(operation_id=...) to get tables",
                 "operations": [
                     {
-                        "id": op.get("Id"),
-                        "code": op.get("Cod_IOE"),
+                        "operation_id": op.get("Id"),  # Use THIS for ine_search(operation_id=...)
+                        "code_ioe": op.get("Cod_IOE"),  # Reference code only
                         "name": op.get("Nombre"),
                         "url": op.get("Url"),
                     }

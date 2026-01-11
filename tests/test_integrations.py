@@ -102,6 +102,26 @@ class TestINEClient:
 
             assert exc_info.value.status_code == 500
 
+    @pytest.mark.asyncio
+    async def test_ine_empty_response_handling(self, ine_client):
+        """Test INE client handles empty responses gracefully.
+
+        The INE API returns empty body (not []) for operations without tables.
+        This should return an empty list, not raise a JSON decode error.
+        """
+        with respx.mock:
+            base_url = "https://servicios.ine.es/wstempus/js/"
+            # Empty response body (INE quirk for operations without tables)
+            respx.get(f"{base_url}ES/TABLAS_OPERACION/99999").respond(
+                status_code=200,
+                content=b"",
+            )
+
+            tables = await ine_client.list_tables("99999")
+
+            assert tables == []
+            assert isinstance(tables, list)
+
 
 # =============================================================================
 # AEMET Tests

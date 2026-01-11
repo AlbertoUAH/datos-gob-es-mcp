@@ -126,6 +126,14 @@ HTTP_POOL_MAX_CONNECTIONS = _get_int("HTTP_POOL_MAX_CONNECTIONS", 20)
 HTTP2_ENABLED = _get_bool("HTTP2_ENABLED", True)
 
 # =============================================================================
+# HTTP Retry Configuration
+# =============================================================================
+HTTP_MAX_RETRIES = _get_int("HTTP_MAX_RETRIES", 3)
+HTTP_RETRY_BACKOFF_INITIAL = _get_float("HTTP_RETRY_BACKOFF_INITIAL", 0.5)
+HTTP_RETRY_BACKOFF_FACTOR = _get_float("HTTP_RETRY_BACKOFF_FACTOR", 2.0)
+HTTP_RETRY_BACKOFF_MAX = _get_float("HTTP_RETRY_BACKOFF_MAX", 10.0)
+
+# =============================================================================
 # Embeddings Performance
 # =============================================================================
 EMBEDDINGS_BATCH_SIZE = _get_int("EMBEDDINGS_BATCH_SIZE", 32)

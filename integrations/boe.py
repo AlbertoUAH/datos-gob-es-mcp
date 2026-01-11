@@ -144,51 +144,85 @@ def _handle_error(e: Exception, context: str = "boe_operation") -> str:
 
 
 def _format_summary(summary: dict[str, Any]) -> dict[str, Any]:
-    """Format BOE summary for cleaner output."""
+    """Format BOE summary for cleaner output.
+
+    BOE API structure:
+    {
+      "data": {
+        "sumario": {
+          "metadatos": {"publicacion": "BOE", "fecha_publicacion": "YYYYMMDD"},
+          "diario": [{
+            "numero": "N",
+            "seccion": [{
+              "nombre": "Section Name",
+              "departamento": [{
+                "nombre": "Department Name",
+                "epigrafe": [{"item": {...} or [{...}]}]
+              }]
+            }]
+          }]
+        }
+      }
+    }
+    """
     if not summary:
         return {"error": "No summary available"}
 
     data = summary.get("data", {})
     sumario = data.get("sumario", {})
     meta = sumario.get("metadatos", {})
-    diario = sumario.get("diario", [])
+    diario_list = sumario.get("diario", [])
 
-    # Extract sections
+    # Get numero from first diario entry
+    numero = None
+    if diario_list and isinstance(diario_list, list) and len(diario_list) > 0:
+        numero = diario_list[0].get("numero")
+
+    # Extract sections from diario
     secciones = []
-    for seccion in diario:
-        seccion_info = {
-            "nombre": seccion.get("sumario_nombre"),
-            "departamentos": [],
-        }
-
-        for dept in seccion.get("seccion", []):
-            dept_info = {
-                "nombre": dept.get("departamento"),
-                "epigrafes": [],
+    for diario in diario_list:
+        for seccion in diario.get("seccion", []):
+            seccion_info = {
+                "nombre": seccion.get("nombre"),
+                "departamentos": [],
             }
 
-            for epigrafe in dept.get("departamento_epigrafe", []):
-                for item in epigrafe.get("item", []):
-                    dept_info["epigrafes"].append(
-                        {
-                            "id": item.get("identificador"),
-                            "titulo": item.get("titulo"),
-                            "url_pdf": item.get("url_pdf", {}).get("texto")
-                            if isinstance(item.get("url_pdf"), dict)
-                            else item.get("url_pdf"),
-                        }
-                    )
+            for dept in seccion.get("departamento", []):
+                dept_info = {
+                    "nombre": dept.get("nombre"),
+                    "documentos": [],
+                }
 
-            if dept_info["epigrafes"]:
-                seccion_info["departamentos"].append(dept_info)
+                # Process epigrafes
+                for epigrafe in dept.get("epigrafe", []):
+                    epigrafe_nombre = epigrafe.get("nombre", "")
+                    items = epigrafe.get("item", [])
 
-        if seccion_info["departamentos"]:
-            secciones.append(seccion_info)
+                    # item can be a single object or a list
+                    if isinstance(items, dict):
+                        items = [items]
+
+                    for item in items:
+                        dept_info["documentos"].append(
+                            {
+                                "id": item.get("identificador"),
+                                "titulo": item.get("titulo"),
+                                "epigrafe": epigrafe_nombre,
+                                "url_pdf": item.get("url_pdf", {}).get("texto")
+                                if isinstance(item.get("url_pdf"), dict)
+                                else item.get("url_pdf"),
+                            }
+                        )
+
+                if dept_info["documentos"]:
+                    seccion_info["departamentos"].append(dept_info)
+
+            if seccion_info["departamentos"]:
+                secciones.append(seccion_info)
 
     return {
         "fecha": meta.get("fecha_publicacion"),
-        "numero": meta.get("pub_numero"),
-        "total_paginas": meta.get("numero_paginas"),
+        "numero": numero,
         "secciones": secciones,
     }
 

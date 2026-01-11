@@ -7,9 +7,7 @@ Este prompt proporciona una guía completa para explorar el catálogo
 de datos.gob.es y encontrar datasets relevantes para un interés específico."""
 
 
-def generate_prompt(
-    interes: str = "datos económicos de España"
-) -> str:
+def generate_prompt(interes: str = "datos económicos de España") -> str:
     """
     Genera el prompt de exploración del catálogo.
 

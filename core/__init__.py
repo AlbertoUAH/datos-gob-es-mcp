@@ -1,72 +1,72 @@
 """Core module for logging, rate limiting, HTTP client utilities, and configuration."""
 
-from .logging import setup_logging, get_logger
-from .ratelimit import RateLimiter, RateLimitExceededError
-from .http import HTTPClient
-from .exceptions import (
-    APIClientError,
-    DatosGobClientError,
-    INEClientError,
-    BOEClientError,
-    AEMETClientError,
-)
-from .errors import handle_api_error
-from .utils import extract_uri_suffix, extract_dict_value, normalize_format, FORMAT_MAPPINGS
 from .client import BaseAPIClient
 from .config import (
-    # Base URLs
-    DATOS_GOB_BASE_URL,
-    INE_BASE_URL,
-    BOE_BASE_URL,
     AEMET_BASE_URL,
-    # Timeouts
-    HTTP_DEFAULT_TIMEOUT,
-    PREVIEW_TIMEOUT,
-    DOWNLOAD_TIMEOUT,
-    RATE_LIMIT_TIMEOUT,
-    # Pagination
-    DEFAULT_PAGE_SIZE,
-    MAX_SEARCH_RESULTS,
-    DEFAULT_PREVIEW_ROWS,
-    MAX_PREVIEW_ROWS,
-    # Cache
-    CACHE_TTL_HOURS,
-    CACHE_DIR,
-    # Download limits
-    PREVIEW_MAX_BYTES,
-    DOWNLOAD_MAX_BYTES,
-    MAX_DOWNLOAD_MB,
-    # Semantic search
-    SEMANTIC_MODEL_NAME,
-    SEMANTIC_MIN_SCORE,
-    SEMANTIC_TOP_K,
-    MAX_SEMANTIC_CANDIDATES,
-    # Processing limits
-    DESCRIPTION_MAX_LENGTH,
-    MAX_KEYWORDS,
-    PARALLEL_PAGES,
-    MAX_STATS_ROWS,
-    # INE specific
-    INE_MAX_TABLES,
-    INE_MAX_DATA_RECORDS,
-    INE_DEFAULT_NLAST,
-    # BOE specific
-    BOE_DEFAULT_SEARCH_DAYS,
-    BOE_MAX_SEARCH_DAYS,
-    BOE_BATCH_SIZE,
-    BOE_MAX_RESULTS,
     # AEMET specific
     AEMET_MAX_FORECAST_DAYS,
-    AEMET_MAX_OBSERVATIONS,
     AEMET_MAX_MUNICIPALITIES,
-    # HTTP Connection Pool
-    HTTP_POOL_MAX_KEEPALIVE,
-    HTTP_POOL_MAX_CONNECTIONS,
-    HTTP2_ENABLED,
+    AEMET_MAX_OBSERVATIONS,
+    BOE_BASE_URL,
+    BOE_BATCH_SIZE,
+    # BOE specific
+    BOE_DEFAULT_SEARCH_DAYS,
+    BOE_MAX_RESULTS,
+    BOE_MAX_SEARCH_DAYS,
+    CACHE_DIR,
+    # Cache
+    CACHE_TTL_HOURS,
+    # Base URLs
+    DATOS_GOB_BASE_URL,
+    # Pagination
+    DEFAULT_PAGE_SIZE,
+    DEFAULT_PREVIEW_ROWS,
+    # Processing limits
+    DESCRIPTION_MAX_LENGTH,
+    DOWNLOAD_MAX_BYTES,
+    DOWNLOAD_TIMEOUT,
     # Embeddings Performance
     EMBEDDINGS_BATCH_SIZE,
+    HTTP2_ENABLED,
+    # Timeouts
+    HTTP_DEFAULT_TIMEOUT,
+    HTTP_POOL_MAX_CONNECTIONS,
+    # HTTP Connection Pool
+    HTTP_POOL_MAX_KEEPALIVE,
+    INE_BASE_URL,
+    INE_DEFAULT_NLAST,
+    INE_MAX_DATA_RECORDS,
+    # INE specific
+    INE_MAX_TABLES,
+    MAX_DOWNLOAD_MB,
+    MAX_KEYWORDS,
+    MAX_PREVIEW_ROWS,
+    MAX_SEARCH_RESULTS,
+    MAX_SEMANTIC_CANDIDATES,
+    MAX_STATS_ROWS,
+    PARALLEL_PAGES,
     PRELOAD_EMBEDDINGS_MODEL,
+    # Download limits
+    PREVIEW_MAX_BYTES,
+    PREVIEW_TIMEOUT,
+    RATE_LIMIT_TIMEOUT,
+    SEMANTIC_MIN_SCORE,
+    # Semantic search
+    SEMANTIC_MODEL_NAME,
+    SEMANTIC_TOP_K,
 )
+from .errors import handle_api_error
+from .exceptions import (
+    AEMETClientError,
+    APIClientError,
+    BOEClientError,
+    DatosGobClientError,
+    INEClientError,
+)
+from .http import HTTPClient
+from .logging import get_logger, setup_logging
+from .ratelimit import RateLimiter, RateLimitExceededError
+from .utils import FORMAT_MAPPINGS, extract_dict_value, extract_uri_suffix, normalize_format
 
 __all__ = [
     # Logging

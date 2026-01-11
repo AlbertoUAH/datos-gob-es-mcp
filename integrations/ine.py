@@ -7,13 +7,13 @@ Base URL: https://servicios.ine.es/wstempus/js/
 import json
 from typing import Any
 
-from core import get_logger, BaseAPIClient, INEClientError, handle_api_error
+from core import BaseAPIClient, INEClientError, get_logger, handle_api_error
 from core.config import (
-    INE_BASE_URL,
     DEFAULT_PAGE_SIZE,
-    INE_MAX_TABLES,
-    INE_MAX_DATA_RECORDS,
+    INE_BASE_URL,
     INE_DEFAULT_NLAST,
+    INE_MAX_DATA_RECORDS,
+    INE_MAX_TABLES,
 )
 
 logger = get_logger("ine")
@@ -55,9 +55,7 @@ class INEClient(BaseAPIClient):
 
             return json.loads(text)
         except json.JSONDecodeError as e:
-            raise self.ERROR_CLASS(
-                f"Invalid JSON from INE API: {e}", status_code=None
-            ) from e
+            raise self.ERROR_CLASS(f"Invalid JSON from INE API: {e}", status_code=None) from e
         except Exception as e:
             status_code = getattr(e, "status_code", None)
             raise self.ERROR_CLASS(str(e), status_code=status_code) from e
@@ -70,10 +68,7 @@ class INEClient(BaseAPIClient):
         """Search statistical operations by name."""
         operations = await self.list_operations()
         query_lower = query.lower()
-        return [
-            op for op in operations
-            if query_lower in op.get("Nombre", "").lower()
-        ]
+        return [op for op in operations if query_lower in op.get("Nombre", "").lower()]
 
     async def get_operation(self, operation_id: str) -> dict[str, Any]:
         """Get details of a specific operation."""
@@ -88,10 +83,7 @@ class INEClient(BaseAPIClient):
         return await self._request(f"ES/METADATATABLA/{table_id}")
 
     async def get_table_data(
-        self,
-        table_id: str,
-        n_last: int | None = None,
-        date: str | None = None
+        self, table_id: str, n_last: int | None = None, date: str | None = None
     ) -> list[dict[str, Any]]:
         """Get data from a specific table.
 
@@ -117,7 +109,7 @@ class INEClient(BaseAPIClient):
         series_id: str,
         n_last: int | None = None,
         date_start: str | None = None,
-        date_end: str | None = None
+        date_end: str | None = None,
     ) -> list[dict[str, Any]]:
         """Get data from a specific time series.
 
@@ -219,8 +211,7 @@ def register_ine_tools(mcp):
             if query:
                 query_lower = query.lower()
                 all_operations = [
-                    op for op in all_operations
-                    if query_lower in op.get("Nombre", "").lower()
+                    op for op in all_operations if query_lower in op.get("Nombre", "").lower()
                 ]
 
             page_size = min(max(1, page_size), 100)
@@ -233,7 +224,9 @@ def register_ine_tools(mcp):
                 "total_operations": len(all_operations),
                 "page": page,
                 "page_size": page_size,
-                "total_pages": (len(all_operations) + page_size - 1) // page_size if all_operations else 0,
+                "total_pages": (len(all_operations) + page_size - 1) // page_size
+                if all_operations
+                else 0,
                 "hint": "Use 'operation_id' field value with ine_search(operation_id=...) to get tables",
                 "operations": [
                     {
@@ -275,13 +268,17 @@ def register_ine_tools(mcp):
 
             processed = []
             for item in data[:INE_MAX_DATA_RECORDS]:
-                processed.append({
-                    "name": item.get("Nombre"),
-                    "value": item.get("Valor"),
-                    "date": item.get("Fecha"),
-                    "period": item.get("T3_Periodo"),
-                    "unit": item.get("Unidad", {}).get("Nombre") if isinstance(item.get("Unidad"), dict) else item.get("Unidad"),
-                })
+                processed.append(
+                    {
+                        "name": item.get("Nombre"),
+                        "value": item.get("Valor"),
+                        "date": item.get("Fecha"),
+                        "period": item.get("T3_Periodo"),
+                        "unit": item.get("Unidad", {}).get("Nombre")
+                        if isinstance(item.get("Unidad"), dict)
+                        else item.get("Unidad"),
+                    }
+                )
 
             output = {
                 "table_id": table_id,

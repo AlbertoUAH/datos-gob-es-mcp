@@ -1,15 +1,13 @@
 """Tests for the core module (logging, rate limiting, HTTP client)."""
 
-import asyncio
-import pytest
-import respx
-from httpx import Response
 from unittest.mock import patch
 
-from core.logging import setup_logging, get_logger
-from core.ratelimit import RateLimiter, DEFAULT_LIMITS
-from core.http import HTTPClient, HTTPClientError
+import pytest
+import respx
 
+from core.http import HTTPClient, HTTPClientError
+from core.logging import get_logger, setup_logging
+from core.ratelimit import DEFAULT_LIMITS, RateLimiter
 
 # =============================================================================
 # Logging Tests
@@ -142,8 +140,7 @@ class TestHTTPClient:
         """Test basic GET request."""
         with respx.mock:
             respx.get("https://api.example.com/endpoint").respond(
-                status_code=200,
-                json={"result": "success"}
+                status_code=200, json={"result": "success"}
             )
 
             response = await client.get("endpoint")
@@ -155,8 +152,7 @@ class TestHTTPClient:
         """Test GET request with JSON response."""
         with respx.mock:
             respx.get("https://api.example.com/data").respond(
-                status_code=200,
-                json={"data": [1, 2, 3]}
+                status_code=200, json={"data": [1, 2, 3]}
             )
 
             data = await client.get_json("data")
@@ -167,8 +163,7 @@ class TestHTTPClient:
         """Test GET request with query parameters."""
         with respx.mock:
             route = respx.get("https://api.example.com/search").respond(
-                status_code=200,
-                json={"results": []}
+                status_code=200, json={"results": []}
             )
 
             await client.get("search", params={"q": "test", "page": 1})
@@ -179,10 +174,7 @@ class TestHTTPClient:
     async def test_post_request(self, client):
         """Test POST request."""
         with respx.mock:
-            respx.post("https://api.example.com/create").respond(
-                status_code=201,
-                json={"id": 123}
-            )
+            respx.post("https://api.example.com/create").respond(status_code=201, json={"id": 123})
 
             response = await client.post("create", json_data={"name": "test"})
             assert response.status_code == 201
@@ -192,8 +184,7 @@ class TestHTTPClient:
         """Test HTTP error handling."""
         with respx.mock:
             respx.get("https://api.example.com/notfound").respond(
-                status_code=404,
-                json={"error": "Not found"}
+                status_code=404, json={"error": "Not found"}
             )
 
             with pytest.raises(HTTPClientError) as exc_info:
@@ -236,8 +227,7 @@ class TestHTTPClient:
         """Test request with absolute URL."""
         with respx.mock:
             respx.get("https://other.example.com/external").respond(
-                status_code=200,
-                json={"external": True}
+                status_code=200, json={"external": True}
             )
 
             response = await client.get("https://other.example.com/external")
@@ -248,8 +238,7 @@ class TestHTTPClient:
         """Test request with custom headers."""
         with respx.mock:
             route = respx.get("https://api.example.com/auth").respond(
-                status_code=200,
-                json={"authenticated": True}
+                status_code=200, json={"authenticated": True}
             )
 
             await client.get("auth", headers={"Authorization": "Bearer token"})
@@ -261,8 +250,7 @@ class TestHTTPClient:
         """Test disabling raise_for_status."""
         with respx.mock:
             respx.get("https://api.example.com/error").respond(
-                status_code=500,
-                json={"error": "Internal error"}
+                status_code=500, json={"error": "Internal error"}
             )
 
             # Should not raise with raise_for_status=False
@@ -283,10 +271,7 @@ class TestHTTPClientWithRateLimiting:
         client = HTTPClient("test_api", "https://api.example.com/", rate_limit=True)
 
         with respx.mock:
-            respx.get("https://api.example.com/data").respond(
-                status_code=200,
-                json={"ok": True}
-            )
+            respx.get("https://api.example.com/data").respond(status_code=200, json={"ok": True})
 
             # Make request
             await client.get("data")
@@ -300,10 +285,7 @@ class TestHTTPClientWithRateLimiting:
         client = HTTPClient("no_limit_api", "https://api.example.com/", rate_limit=False)
 
         with respx.mock:
-            respx.get("https://api.example.com/data").respond(
-                status_code=200,
-                json={"ok": True}
-            )
+            respx.get("https://api.example.com/data").respond(status_code=200, json={"ok": True})
 
             await client.get("data")
 

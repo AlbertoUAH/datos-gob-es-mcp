@@ -1,14 +1,11 @@
 """Tests for external API integrations (INE, AEMET, BOE)."""
 
-import json
 import pytest
 import respx
-from httpx import Response
 
-from integrations.ine import INEClient, INEClientError
 from integrations.aemet import AEMETClient, AEMETClientError
 from integrations.boe import BOEClient, BOEClientError
-
+from integrations.ine import INEClient, INEClientError
 
 # =============================================================================
 # INE Tests
@@ -152,12 +149,14 @@ class TestAEMETClient:
 
             # Mock the data URL
             mock.get("https://opendata.aemet.es/data/forecast123").respond(
-                json=[{
-                    "nombre": "Madrid",
-                    "provincia": "Madrid",
-                    "elaborado": "2024-12-26T10:00:00",
-                    "prediccion": {"dia": []}
-                }]
+                json=[
+                    {
+                        "nombre": "Madrid",
+                        "provincia": "Madrid",
+                        "elaborado": "2024-12-26T10:00:00",
+                        "prediccion": {"dia": []},
+                    }
+                ]
             )
 
             # Mock municipalities
@@ -242,8 +241,6 @@ class TestBOEClient:
     def mock_boe_api(self):
         """Mock BOE API responses."""
         with respx.mock(assert_all_called=False) as mock:
-            base_url = "https://www.boe.es/datosabiertos/api/"
-
             # Mock summary
             mock.get(url__regex=r".*/boe/sumario/\d+").respond(
                 json={
@@ -257,9 +254,9 @@ class TestBOEClient:
                             "diario": [
                                 {
                                     "sumario_nombre": "Seccion I",
-                                    "seccion": [{"departamento": "Ministerio de Hacienda"}]
+                                    "seccion": [{"departamento": "Ministerio de Hacienda"}],
                                 }
-                            ]
+                            ],
                         }
                     }
                 }
@@ -275,7 +272,7 @@ class TestBOEClient:
                                 "titulo": "Real Decreto de ejemplo",
                                 "fecha_publicacion": "2024-12-26",
                             },
-                            "analisis": {"materias": [], "notas": []}
+                            "analisis": {"materias": [], "notas": []},
                         }
                     }
                 }

@@ -9,9 +9,7 @@ calidad de datos y posibles usos."""
 
 
 def generate_prompt(
-    dataset_id: str = "",
-    incluir_distribuciones: bool = True,
-    evaluar_calidad: bool = True
+    dataset_id: str = "", incluir_distribuciones: bool = True, evaluar_calidad: bool = True
 ) -> str:
     """
     Genera el prompt de análisis de dataset.
@@ -23,7 +21,8 @@ def generate_prompt(
     """
     dataset_ref = f"**{dataset_id}**" if dataset_id else "el dataset especificado"
 
-    seccion_distribuciones = """
+    seccion_distribuciones = (
+        """
 ### Fase 3: Análisis de Distribuciones
 
 #### 3.1 Inventario de distribuciones
@@ -48,9 +47,13 @@ Para cada distribución, documenta:
 | JSON | Estructurado, APIs | Desarrollo web, aplicaciones |
 | XML | Interoperabilidad | Integración con sistemas legacy |
 | RDF | Datos enlazados | Web semántica, SPARQL |
-""" if incluir_distribuciones else ""
+"""
+        if incluir_distribuciones
+        else ""
+    )
 
-    seccion_calidad = """
+    seccion_calidad = (
+        """
 ### Fase 4: Evaluación de Calidad
 
 #### 4.1 Completitud de metadatos
@@ -83,7 +86,10 @@ Asigna una puntuación basada en:
 - Actualidad de datos (25 puntos)
 - Accesibilidad de distribuciones (25 puntos)
 - Documentación y usabilidad (25 puntos)
-""" if evaluar_calidad else ""
+"""
+        if evaluar_calidad
+        else ""
+    )
 
     return f"""# Análisis Detallado de Dataset
 

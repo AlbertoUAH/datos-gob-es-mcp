@@ -6,10 +6,10 @@ from typing import Any, ClassVar
 import httpx
 
 from .config import (
-    HTTP_DEFAULT_TIMEOUT,
-    HTTP_POOL_MAX_KEEPALIVE,
-    HTTP_POOL_MAX_CONNECTIONS,
     HTTP2_ENABLED,
+    HTTP_DEFAULT_TIMEOUT,
+    HTTP_POOL_MAX_CONNECTIONS,
+    HTTP_POOL_MAX_KEEPALIVE,
 )
 from .logging import get_logger
 from .ratelimit import RateLimiter
@@ -242,8 +242,7 @@ class HTTPClient:
     ) -> httpx.Response:
         """Make a GET request."""
         return await self.request(
-            "GET", endpoint, params=params, headers=headers,
-            raise_for_status=raise_for_status
+            "GET", endpoint, params=params, headers=headers, raise_for_status=raise_for_status
         )
 
     async def post(
@@ -256,8 +255,12 @@ class HTTPClient:
     ) -> httpx.Response:
         """Make a POST request."""
         return await self.request(
-            "POST", endpoint, params=params, headers=headers,
-            json_data=json_data, raise_for_status=raise_for_status
+            "POST",
+            endpoint,
+            params=params,
+            headers=headers,
+            json_data=json_data,
+            raise_for_status=raise_for_status,
         )
 
     async def get_json(

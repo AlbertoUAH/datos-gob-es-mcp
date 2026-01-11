@@ -4,15 +4,12 @@ import asyncio
 import csv
 import io
 import json
-import os
 import pickle
 import re
 import time
 import unicodedata
 from pathlib import Path
 from typing import Any
-
-from urllib.parse import urljoin
 
 
 def normalize_text(text: str) -> str:
@@ -22,9 +19,10 @@ def normalize_text(text: str) -> str:
     so we normalize them before searching.
     """
     # Normalize to NFD form (decomposed), remove combining characters (accents)
-    normalized = unicodedata.normalize('NFD', text)
-    without_accents = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+    normalized = unicodedata.normalize("NFD", text)
+    without_accents = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
     return without_accents
+
 
 import httpx
 from fastmcp import FastMCP
@@ -32,38 +30,32 @@ from pydantic import BaseModel, Field
 
 # Core utilities for logging, rate limiting, and configuration
 from core import (
-    setup_logging,
-    get_logger,
-    HTTPClient,
+    CACHE_DIR,
+    CACHE_TTL_HOURS,
+    DATOS_GOB_BASE_URL,
+    DEFAULT_PAGE_SIZE,
+    DEFAULT_PREVIEW_ROWS,
+    DESCRIPTION_MAX_LENGTH,
+    DOWNLOAD_MAX_BYTES,
+    DOWNLOAD_TIMEOUT,
+    EMBEDDINGS_BATCH_SIZE,
+    MAX_DOWNLOAD_MB,
+    MAX_KEYWORDS,
+    MAX_SEARCH_RESULTS,
+    MAX_SEMANTIC_CANDIDATES,
+    MAX_STATS_ROWS,
+    PARALLEL_PAGES,
+    PRELOAD_EMBEDDINGS_MODEL,
+    PREVIEW_MAX_BYTES,
+    PREVIEW_TIMEOUT,
+    SEMANTIC_MIN_SCORE,
+    SEMANTIC_MODEL_NAME,
+    SEMANTIC_TOP_K,
     BaseAPIClient,
     DatosGobClientError,
+    get_logger,
     handle_api_error,
-    normalize_format,
-    # Configuration
-    DATOS_GOB_BASE_URL,
-    HTTP_DEFAULT_TIMEOUT,
-    DEFAULT_PAGE_SIZE,
-    MAX_SEARCH_RESULTS,
-    PREVIEW_TIMEOUT,
-    DOWNLOAD_TIMEOUT,
-    PREVIEW_MAX_BYTES,
-    DOWNLOAD_MAX_BYTES,
-    MAX_DOWNLOAD_MB,
-    SEMANTIC_MODEL_NAME,
-    SEMANTIC_MIN_SCORE,
-    SEMANTIC_TOP_K,
-    MAX_SEMANTIC_CANDIDATES,
-    DESCRIPTION_MAX_LENGTH,
-    MAX_KEYWORDS,
-    PARALLEL_PAGES,
-    MAX_STATS_ROWS,
-    CACHE_TTL_HOURS,
-    CACHE_DIR,
-    DEFAULT_PREVIEW_ROWS,
-    MAX_PREVIEW_ROWS,
-    # Performance
-    EMBEDDINGS_BATCH_SIZE,
-    PRELOAD_EMBEDDINGS_MODEL,
+    setup_logging,
 )
 
 # Initialize structured logging
@@ -86,6 +78,7 @@ def _load_embeddings_dependencies() -> bool:
     try:
         import numpy as _np
         from sentence_transformers import SentenceTransformer as _ST
+
         np = _np
         SentenceTransformer = _ST
         EMBEDDINGS_AVAILABLE = True
@@ -104,17 +97,99 @@ def _load_embeddings_dependencies() -> bool:
 # Stopwords español/inglés básicas para filtrar de queries
 STOPWORDS = {
     # Español
-    "de", "la", "el", "en", "los", "las", "un", "una", "y", "o", "que",
-    "del", "al", "es", "por", "con", "para", "sobre", "como", "su", "sus",
-    "se", "no", "mas", "pero", "este", "esta", "esto", "estos", "estas",
-    "mi", "tu", "nos", "les", "lo", "le", "me", "te", "si", "ya", "muy",
-    "datos", "dataset", "datasets", "informacion", "buscar", "encontrar",
-    "dame", "quiero", "necesito", "muestra", "mostrar", "ver", "todos",
+    "de",
+    "la",
+    "el",
+    "en",
+    "los",
+    "las",
+    "un",
+    "una",
+    "y",
+    "o",
+    "que",
+    "del",
+    "al",
+    "es",
+    "por",
+    "con",
+    "para",
+    "sobre",
+    "como",
+    "su",
+    "sus",
+    "se",
+    "no",
+    "mas",
+    "pero",
+    "este",
+    "esta",
+    "esto",
+    "estos",
+    "estas",
+    "mi",
+    "tu",
+    "nos",
+    "les",
+    "lo",
+    "le",
+    "me",
+    "te",
+    "si",
+    "ya",
+    "muy",
+    "datos",
+    "dataset",
+    "datasets",
+    "informacion",
+    "buscar",
+    "encontrar",
+    "dame",
+    "quiero",
+    "necesito",
+    "muestra",
+    "mostrar",
+    "ver",
+    "todos",
     # Inglés
-    "the", "a", "an", "of", "in", "on", "for", "to", "and", "or", "with",
-    "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
-    "do", "does", "did", "will", "would", "could", "should", "may", "might",
-    "data", "find", "search", "show", "get", "all", "from", "about",
+    "the",
+    "a",
+    "an",
+    "of",
+    "in",
+    "on",
+    "for",
+    "to",
+    "and",
+    "or",
+    "with",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "will",
+    "would",
+    "could",
+    "should",
+    "may",
+    "might",
+    "data",
+    "find",
+    "search",
+    "show",
+    "get",
+    "all",
+    "from",
+    "about",
 }
 
 
@@ -131,7 +206,7 @@ def _extract_keywords(query: str, max_keywords: int = MAX_KEYWORDS) -> list[str]
     # Normalizar: quitar acentos y convertir a minúsculas
     normalized = normalize_text(query.lower())
     # Extraer palabras (solo alfanuméricas)
-    words = re.findall(r'\b[a-zA-Z0-9]+\b', normalized)
+    words = re.findall(r"\b[a-zA-Z0-9]+\b", normalized)
     # Filtrar stopwords y palabras muy cortas
     keywords = [w for w in words if w not in STOPWORDS and len(w) > 2]
     # Eliminar duplicados manteniendo orden
@@ -192,8 +267,12 @@ class DatasetSummary(BaseModel):
         title = cls._extract_text(item.get("title"), lang)
         description = cls._extract_text(item.get("description"), lang)
         # Truncate long descriptions to reduce payload size
-        if description and isinstance(description, str) and len(description) > DESCRIPTION_MAX_LENGTH:
-            description = description[:DESCRIPTION_MAX_LENGTH - 3] + "..."
+        if (
+            description
+            and isinstance(description, str)
+            and len(description) > DESCRIPTION_MAX_LENGTH
+        ):
+            description = description[: DESCRIPTION_MAX_LENGTH - 3] + "..."
 
         distributions = item.get("distribution", [])
         if isinstance(distributions, dict):
@@ -479,7 +558,9 @@ class ColumnStats(BaseModel):
     """Statistics for a single column."""
 
     name: str
-    inferred_type: str  # "string", "integer", "float", "boolean", "date", "datetime", "null", "mixed"
+    inferred_type: (
+        str  # "string", "integer", "float", "boolean", "date", "datetime", "null", "mixed"
+    )
     null_count: int = 0
     unique_count: int | None = None  # None if too many to count
     sample_values: list[Any] | None = None  # Up to 5 sample non-null values
@@ -598,7 +679,7 @@ class SemanticRanker:
         query: str,
         datasets: list[dict[str, Any]],
         min_score: float = SEMANTIC_MIN_SCORE,
-        top_k: int = SEMANTIC_TOP_K
+        top_k: int = SEMANTIC_TOP_K,
     ) -> list[dict[str, Any]]:
         """Re-rankea datasets por similaridad semántica con la query.
 
@@ -634,10 +715,7 @@ class SemanticRanker:
             return []
 
         # Batch encode - MUCH faster than loop
-        query_embedding = self.model.encode(
-            f"query: {query}",
-            normalize_embeddings=True
-        )
+        query_embedding = self.model.encode(f"query: {query}", normalize_embeddings=True)
         text_embeddings = self.model.encode(
             [f"passage: {t}" for t in valid_texts],
             normalize_embeddings=True,
@@ -719,7 +797,10 @@ class MetadataCache:
             self.autonomous_regions = cache_data.get("autonomous_regions")
             self.public_sectors = cache_data.get("public_sectors")
             self.spatial_coverage = cache_data.get("spatial_coverage")
-            logger.info("metadata_cache_loaded", age_hours=round((time.time() - self._cache_timestamp) / 3600, 1))
+            logger.info(
+                "metadata_cache_loaded",
+                age_hours=round((time.time() - self._cache_timestamp) / 3600, 1),
+            )
             return True
         except Exception as e:
             logger.warning("metadata_cache_load_failed", error=str(e))
@@ -815,7 +896,9 @@ class MetadataCache:
 
     async def get_autonomous_regions(self, client: "DatosGobClient") -> list[dict]:
         """Get autonomous regions, using cache if available."""
-        return await self._fetch_all_paginated(client, "list_autonomous_regions", "autonomous_regions")
+        return await self._fetch_all_paginated(
+            client, "list_autonomous_regions", "autonomous_regions"
+        )
 
     async def get_public_sectors(self, client: "DatosGobClient") -> list[dict]:
         """Get public sectors, using cache if available."""
@@ -831,10 +914,16 @@ class MetadataCache:
         This method fetches all metadata types concurrently, which is faster
         than fetching them sequentially when multiple types are needed.
         """
-        if self._is_cache_valid() and all([
-            self.publishers, self.themes, self.provinces,
-            self.autonomous_regions, self.public_sectors, self.spatial_coverage
-        ]):
+        if self._is_cache_valid() and all(
+            [
+                self.publishers,
+                self.themes,
+                self.provinces,
+                self.autonomous_regions,
+                self.public_sectors,
+                self.spatial_coverage,
+            ]
+        ):
             logger.debug("metadata_preload_skipped", reason="cache_valid")
             return
 
@@ -853,8 +942,12 @@ class MetadataCache:
 
         # Log any failures
         metadata_names = [
-            "publishers", "themes", "provinces",
-            "autonomous_regions", "public_sectors", "spatial_coverage"
+            "publishers",
+            "themes",
+            "provinces",
+            "autonomous_regions",
+            "public_sectors",
+            "spatial_coverage",
         ]
         for name, result in zip(metadata_names, results):
             if isinstance(result, Exception):
@@ -904,7 +997,7 @@ class UsageMetrics:
         """Load metrics from disk if available."""
         try:
             if self.METRICS_FILE.exists():
-                with open(self.METRICS_FILE, "r", encoding="utf-8") as f:
+                with open(self.METRICS_FILE, encoding="utf-8") as f:
                     data = json.load(f)
                     self.tool_calls = data.get("tool_calls", {})
                     self.dataset_accesses = data.get("dataset_accesses", {})
@@ -941,27 +1034,21 @@ class UsageMetrics:
 
     def record_search(self, query_params: dict[str, Any]) -> None:
         """Record a search query."""
-        self.search_queries.append({
-            "timestamp": time.time(),
-            "params": {k: v for k, v in query_params.items() if v is not None},
-        })
+        self.search_queries.append(
+            {
+                "timestamp": time.time(),
+                "params": {k: v for k, v in query_params.items() if v is not None},
+            }
+        )
         self._save_metrics()
 
     def get_stats(self) -> dict[str, Any]:
         """Get usage statistics."""
         # Top 10 most used tools
-        top_tools = sorted(
-            self.tool_calls.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:10]
+        top_tools = sorted(self.tool_calls.items(), key=lambda x: x[1], reverse=True)[:10]
 
         # Top 10 most accessed datasets
-        top_datasets = sorted(
-            self.dataset_accesses.items(),
-            key=lambda x: x[1],
-            reverse=True
-        )[:10]
+        top_datasets = sorted(self.dataset_accesses.items(), key=lambda x: x[1], reverse=True)[:10]
 
         # Recent search patterns
         recent_searches = self.search_queries[-10:]
@@ -1092,7 +1179,9 @@ class DatosGobClient(BaseAPIClient):
             f"catalog/dataset/modified/begin/{begin_date}/end/{end_date}", params
         )
 
-    async def list_distributions(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+    async def list_distributions(
+        self, pagination: PaginationParams | None = None
+    ) -> dict[str, Any]:
         params = self._build_params(pagination)
         return await self._request("catalog/distribution", params)
 
@@ -1112,7 +1201,9 @@ class DatosGobClient(BaseAPIClient):
         params = self._build_params(pagination)
         return await self._request("catalog/publisher", params)
 
-    async def list_spatial_coverage(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+    async def list_spatial_coverage(
+        self, pagination: PaginationParams | None = None
+    ) -> dict[str, Any]:
         params = self._build_params(pagination)
         return await self._request("catalog/spatial", params)
 
@@ -1120,7 +1211,9 @@ class DatosGobClient(BaseAPIClient):
         params = self._build_params(pagination)
         return await self._request("catalog/theme", params)
 
-    async def list_public_sectors(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+    async def list_public_sectors(
+        self, pagination: PaginationParams | None = None
+    ) -> dict[str, Any]:
         params = self._build_params(pagination)
         return await self._request("nti/public-sector", params)
 
@@ -1134,7 +1227,9 @@ class DatosGobClient(BaseAPIClient):
     async def get_province(self, province_id: str) -> dict[str, Any]:
         return await self._request(f"nti/territory/Province/{province_id}")
 
-    async def list_autonomous_regions(self, pagination: PaginationParams | None = None) -> dict[str, Any]:
+    async def list_autonomous_regions(
+        self, pagination: PaginationParams | None = None
+    ) -> dict[str, Any]:
         params = self._build_params(pagination)
         return await self._request("nti/territory/Autonomous-region", params)
 
@@ -1209,8 +1304,7 @@ def _format_response(
 
     if summary_type == "dataset":
         output["datasets"] = [
-            DatasetSummary.from_api_item(item, lang).model_dump(exclude_none=True)
-            for item in items
+            DatasetSummary.from_api_item(item, lang).model_dump(exclude_none=True) for item in items
         ]
     elif summary_type == "distribution":
         output["distributions"] = [
@@ -1313,11 +1407,11 @@ def _matches_exact_word(text: str, search_term: str) -> bool:
 
 
 def _filter_items_by_exact_match(
-    items: list[dict[str, Any]],
-    search_term: str,
-    fields: list[str] = ["title", "description"]
+    items: list[dict[str, Any]], search_term: str, fields: list[str] | None = None
 ) -> list[dict[str, Any]]:
     """Filter items to only include those with exact word matches."""
+    if fields is None:
+        fields = ["title", "description"]
     filtered = []
     for item in items:
         for field in fields:
@@ -1352,7 +1446,9 @@ def _filter_datasets_locally(
         license_filter: Filter by license.
         frequency_filter: Filter by update frequency.
     """
-    if not any([publisher, theme, themes, format_filter, keyword, title, license_filter, frequency_filter]):
+    if not any(
+        [publisher, theme, themes, format_filter, keyword, title, license_filter, frequency_filter]
+    ):
         return items
 
     filtered = []
@@ -1500,6 +1596,7 @@ def _filter_datasets_locally(
 
 # Constants are now imported from core.config:
 # DEFAULT_PAGE_SIZE, PREVIEW_MAX_BYTES, PREVIEW_TIMEOUT
+
 
 async def _search_by_keywords_combined(
     keywords: list[str],
@@ -1656,12 +1753,14 @@ def _validate_date(date_str: str | None, param_name: str) -> str | None:
     # Try ISO format first
     try:
         # Handle various ISO formats
-        normalized = date_str.replace('Z', '+00:00')
-        if 'T' in normalized:
+        normalized = date_str.replace("Z", "+00:00")
+        if "T" in normalized:
             from datetime import datetime
+
             datetime.fromisoformat(normalized)
         else:
             from datetime import datetime
+
             # Try YYYY-MM-DD
             datetime.strptime(date_str, "%Y-%m-%d")
         return date_str
@@ -1672,6 +1771,7 @@ def _validate_date(date_str: str | None, param_name: str) -> str | None:
     if len(date_str) == 8 and date_str.isdigit():
         try:
             from datetime import datetime
+
             dt = datetime.strptime(date_str, "%Y%m%d")
             return dt.strftime("%Y-%m-%d")
         except ValueError:
@@ -1773,6 +1873,7 @@ def _infer_value_type(value: Any) -> str:
             r"^\d{2}-\d{2}-\d{4}$",  # 15-01-2024
         ]
         import re
+
         for pattern in date_patterns:
             if re.match(pattern, val):
                 return "date"
@@ -1790,7 +1891,9 @@ def _infer_value_type(value: Any) -> str:
     return "string"
 
 
-def _calculate_column_stats(columns: list[str], rows: list[list[Any]], max_sample: int = 5) -> list[ColumnStats]:
+def _calculate_column_stats(
+    columns: list[str], rows: list[list[Any]], max_sample: int = 5
+) -> list[ColumnStats]:
     """Calculate statistics for each column."""
     if not columns or not rows:
         return []
@@ -1877,15 +1980,17 @@ def _calculate_column_stats(columns: list[str], rows: list[list[Any]], max_sampl
             if max_value == int(max_value):
                 max_value = int(max_value)
 
-        stats.append(ColumnStats(
-            name=col_name,
-            inferred_type=inferred_type,
-            null_count=null_count,
-            unique_count=unique_count,
-            sample_values=sample_values,
-            min_value=min_value,
-            max_value=max_value,
-        ))
+        stats.append(
+            ColumnStats(
+                name=col_name,
+                inferred_type=inferred_type,
+                null_count=null_count,
+                unique_count=unique_count,
+                sample_values=sample_values,
+                min_value=min_value,
+                max_value=max_value,
+            )
+        )
 
     return stats
 
@@ -2225,7 +2330,10 @@ async def _download_full_data(
     except httpx.TimeoutException:
         return {"error": "Download timed out", "format": normalized_format or "unknown"}
     except httpx.HTTPStatusError as e:
-        return {"error": f"HTTP error {e.response.status_code}", "format": normalized_format or "unknown"}
+        return {
+            "error": f"HTTP error {e.response.status_code}",
+            "format": normalized_format or "unknown",
+        }
     except Exception as e:
         return {"error": str(e), "format": normalized_format or "unknown"}
 
@@ -2347,7 +2455,9 @@ async def _add_previews_to_dataset_list(
             try:
                 dataset_id = uri.split("/")[-1]
                 dataset_data = await client.get_dataset(dataset_id)
-                dist_list = dataset_data.get("result", {}).get("primaryTopic", {}).get("distribution", [])
+                dist_list = (
+                    dataset_data.get("result", {}).get("primaryTopic", {}).get("distribution", [])
+                )
                 if isinstance(dist_list, dict):
                     dist_list = [dist_list]
 
@@ -2460,7 +2570,9 @@ async def get(
             distributions = [distributions]
 
         if not distributions:
-            return json.dumps({"error": "No distributions found for this dataset"}, ensure_ascii=False)
+            return json.dumps(
+                {"error": "No distributions found for this dataset"}, ensure_ascii=False
+            )
 
         # Find best distribution matching preferred format
         best_dist = None
@@ -2482,12 +2594,16 @@ async def get(
                         break
 
         if not best_dist:
-            available_formats = [d.get("format", {}).get("_value", d.get("format", "unknown"))
-                               for d in distributions]
-            return json.dumps({
-                "error": f"No compatible distribution found. Available formats: {available_formats}",
-                "supported_formats": ["csv", "json", "tsv"],
-            }, ensure_ascii=False)
+            available_formats = [
+                d.get("format", {}).get("_value", d.get("format", "unknown")) for d in distributions
+            ]
+            return json.dumps(
+                {
+                    "error": f"No compatible distribution found. Available formats: {available_formats}",
+                    "supported_formats": ["csv", "json", "tsv"],
+                },
+                ensure_ascii=False,
+            )
 
         access_url = best_dist.get("accessURL")
         if not access_url:
@@ -2576,10 +2692,17 @@ async def _search_datasets_impl(
     """
     # Record usage metrics
     usage_metrics.record_tool_call("search_datasets")
-    usage_metrics.record_search({
-        "title": title, "publisher": publisher, "theme": theme, "themes": themes,
-        "format": format, "keyword": keyword, "query": query,
-    })
+    usage_metrics.record_search(
+        {
+            "title": title,
+            "publisher": publisher,
+            "theme": theme,
+            "themes": themes,
+            "format": format,
+            "keyword": keyword,
+            "query": query,
+        }
+    )
 
     try:
         # Validate date formats first
@@ -2599,11 +2722,14 @@ async def _search_datasets_impl(
             keywords = _extract_keywords(query)
 
             if not keywords:
-                return json.dumps({
-                    "error": "No se pudieron extraer keywords de la query",
-                    "query": query,
-                    "suggestion": "Usa términos más específicos o usa el parámetro 'title' para búsqueda directa."
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "error": "No se pudieron extraer keywords de la query",
+                        "query": query,
+                        "suggestion": "Usa términos más específicos o usa el parámetro 'title' para búsqueda directa.",
+                    },
+                    ensure_ascii=False,
+                )
 
             # =============================================================
             # STEP 1: KEYWORD + TITLE SEARCH - Búsqueda amplia en paralelo
@@ -2621,24 +2747,34 @@ async def _search_datasets_impl(
             unique_items = all_items
             if any([publisher, theme, themes, format, date_start]):
                 unique_items = _filter_datasets_locally(
-                    unique_items, publisher, theme, themes, format, keyword=None,
-                    license_filter=license, frequency_filter=frequency
+                    unique_items,
+                    publisher,
+                    theme,
+                    themes,
+                    format,
+                    keyword=None,
+                    license_filter=license,
+                    frequency_filter=frequency,
                 )
 
             total_from_search = len(unique_items)
 
             if not unique_items:
-                return json.dumps({
-                    "search_mode": "query (keyword + title search)",
-                    "query": query,
-                    "keywords_extracted": keywords_to_search,
-                    "step1_search": {
-                        "sources": ["keyword", "title"],
+                return json.dumps(
+                    {
+                        "search_mode": "query (keyword + title search)",
+                        "query": query,
+                        "keywords_extracted": keywords_to_search,
+                        "step1_search": {
+                            "sources": ["keyword", "title"],
+                            "total_results": 0,
+                        },
                         "total_results": 0,
+                        "datasets": [],
                     },
-                    "total_results": 0,
-                    "datasets": [],
-                }, ensure_ascii=False, indent=2)
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
             # Construir summaries para el pool de candidatos (máx 500)
             max_candidates = MAX_SEMANTIC_CANDIDATES
@@ -2653,48 +2789,54 @@ async def _search_datasets_impl(
             if not _load_embeddings_dependencies():
                 # Fallback: devolver resultados sin filtro semántico
                 datasets = datasets[:max_results]
-                return json.dumps({
-                    "search_mode": "query (keyword + title search, no semantic filter)",
-                    "query": query,
-                    "keywords_extracted": keywords_to_search,
-                    "step1_search": {
-                        "sources": ["keyword", "title"],
-                        "total_raw_results": len(all_items),
-                        "total_after_filters": total_from_search,
+                return json.dumps(
+                    {
+                        "search_mode": "query (keyword + title search, no semantic filter)",
+                        "query": query,
+                        "keywords_extracted": keywords_to_search,
+                        "step1_search": {
+                            "sources": ["keyword", "title"],
+                            "total_raw_results": len(all_items),
+                            "total_after_filters": total_from_search,
+                        },
+                        "total_results": len(datasets),
+                        "note": "Semantic filter not available (install sentence-transformers)",
+                        "datasets": datasets,
                     },
-                    "total_results": len(datasets),
-                    "note": "Semantic filter not available (install sentence-transformers)",
-                    "datasets": datasets,
-                }, ensure_ascii=False, indent=2)
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
             # Aplicar filtro semántico: solo mantener resultados con score >= min_score
             ranked = semantic_ranker.rank_results(
-                query, datasets,
-                min_score=semantic_min_score,
-                top_k=max_results
+                query, datasets, min_score=semantic_min_score, top_k=max_results
             )
 
             # Añadir previews si se solicitaron
             if include_preview and ranked:
                 await _add_previews_to_dataset_list(ranked, preview_rows)
 
-            return json.dumps({
-                "search_mode": "query (keyword + title search + semantic filter)",
-                "query": query,
-                "keywords_extracted": keywords_to_search,
-                "step1_search": {
-                    "sources": ["keyword", "title"],
-                    "total_raw_results": len(all_items),
-                    "total_after_filters": total_from_search,
-                    "candidates_for_semantic": len(datasets),
+            return json.dumps(
+                {
+                    "search_mode": "query (keyword + title search + semantic filter)",
+                    "query": query,
+                    "keywords_extracted": keywords_to_search,
+                    "step1_search": {
+                        "sources": ["keyword", "title"],
+                        "total_raw_results": len(all_items),
+                        "total_after_filters": total_from_search,
+                        "candidates_for_semantic": len(datasets),
+                    },
+                    "step2_semantic_filter": {
+                        "min_score": semantic_min_score,
+                        "results_passing_filter": len(ranked),
+                    },
+                    "total_results": len(ranked),
+                    "datasets": ranked,
                 },
-                "step2_semantic_filter": {
-                    "min_score": semantic_min_score,
-                    "results_passing_filter": len(ranked),
-                },
-                "total_results": len(ranked),
-                "datasets": ranked,
-            }, ensure_ascii=False, indent=2)
+                ensure_ascii=False,
+                indent=2,
+            )
 
         # =================================================================
         # FILTER-BASED SEARCH MODE (traditional, no semantic re-ranking)
@@ -2709,7 +2851,9 @@ async def _search_datasets_impl(
                 # Normalize title for API (remove accents)
                 normalized_title = normalize_text(title)
                 for current_page in range(max_pages):
-                    page_pagination = PaginationParams(page=current_page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
+                    page_pagination = PaginationParams(
+                        page=current_page, page_size=DEFAULT_PAGE_SIZE, sort=sort
+                    )
                     data = await client.search_datasets_by_title(normalized_title, page_pagination)
 
                     result = data.get("result", {})
@@ -2721,8 +2865,14 @@ async def _search_datasets_impl(
                     filtered = _filter_items_by_exact_match(items, title)
                     # Apply local filters
                     filtered = _filter_datasets_locally(
-                        filtered, publisher, theme, themes, format, keyword,
-                        license_filter=license, frequency_filter=frequency
+                        filtered,
+                        publisher,
+                        theme,
+                        themes,
+                        format,
+                        keyword,
+                        license_filter=license,
+                        frequency_filter=frequency,
                     )
                     all_filtered_items.extend(filtered)
 
@@ -2767,11 +2917,24 @@ async def _search_datasets_impl(
                 normalized_title = normalize_text(title)
                 data = await client.search_datasets_by_title(normalized_title, pagination)
                 # keyword filtering is handled locally by _filter_datasets_locally
-                local_filters = {"publisher": publisher, "theme": theme, "themes": themes, "format": format, "keyword": keyword, "title": title}
+                local_filters = {
+                    "publisher": publisher,
+                    "theme": theme,
+                    "themes": themes,
+                    "format": format,
+                    "keyword": keyword,
+                    "title": title,
+                }
 
         elif date_start and date_end:
             data = await client.get_datasets_by_date_range(date_start, date_end, pagination)
-            local_filters = {"publisher": publisher, "theme": theme, "themes": themes, "format": format, "keyword": keyword}
+            local_filters = {
+                "publisher": publisher,
+                "theme": theme,
+                "themes": themes,
+                "format": format,
+                "keyword": keyword,
+            }
 
         elif publisher:
             data = await client.get_datasets_by_publisher(publisher, pagination)
@@ -2785,11 +2948,22 @@ async def _search_datasets_impl(
             else:
                 # Multiple themes - need to fetch and filter locally
                 data = await client.list_datasets(pagination)
-                local_filters = {"publisher": publisher, "theme": theme, "themes": themes, "format": format, "keyword": keyword}
+                local_filters = {
+                    "publisher": publisher,
+                    "theme": theme,
+                    "themes": themes,
+                    "format": format,
+                    "keyword": keyword,
+                }
 
         elif format:
             data = await client.get_datasets_by_format(format, pagination)
-            local_filters = {"publisher": publisher, "theme": theme, "themes": themes, "keyword": keyword}
+            local_filters = {
+                "publisher": publisher,
+                "theme": theme,
+                "themes": themes,
+                "keyword": keyword,
+            }
 
         elif keyword:
             # Search by keyword AND by title to get comprehensive results
@@ -2801,7 +2975,9 @@ async def _search_datasets_impl(
                 max_pages = 20  # Limit to prevent excessive API calls
 
                 while len(all_items) < max_results and current_page < max_pages:
-                    page_pagination = PaginationParams(page=current_page, page_size=DEFAULT_PAGE_SIZE, sort=sort)
+                    page_pagination = PaginationParams(
+                        page=current_page, page_size=DEFAULT_PAGE_SIZE, sort=sort
+                    )
                     page_items = await _search_by_keywords_combined([keyword], page_pagination)
 
                     if not page_items:
@@ -2826,8 +3002,20 @@ async def _search_datasets_impl(
             else:
                 all_items = await _search_by_keywords_combined([keyword], pagination)
 
-            data = {"result": {"items": all_items, "page": 0, "itemsPerPage": len(all_items), "fetch_all": fetch_all}}
-            local_filters = {"publisher": publisher, "theme": theme, "themes": themes, "format": format}
+            data = {
+                "result": {
+                    "items": all_items,
+                    "page": 0,
+                    "itemsPerPage": len(all_items),
+                    "fetch_all": fetch_all,
+                }
+            }
+            local_filters = {
+                "publisher": publisher,
+                "theme": theme,
+                "themes": themes,
+                "format": format,
+            }
 
         else:
             # No filters provided, list all datasets
@@ -3118,6 +3306,7 @@ async def resource_keyword_datasets(keyword: str) -> str:
 # Import and register prompts from the prompts package
 try:
     from prompts import register_prompts
+
     register_prompts(mcp)
 except ImportError:
     # Prompts folder not available, skip registration
@@ -3131,6 +3320,7 @@ except ImportError:
 # Import and register INE tools
 try:
     from integrations.ine import register_ine_tools
+
     register_ine_tools(mcp)
 except ImportError:
     # INE integration not available
@@ -3139,6 +3329,7 @@ except ImportError:
 # Import and register AEMET tools
 try:
     from integrations.aemet import register_aemet_tools
+
     register_aemet_tools(mcp)
 except ImportError:
     # AEMET integration not available
@@ -3147,6 +3338,7 @@ except ImportError:
 # Import and register BOE tools
 try:
     from integrations.boe import register_boe_tools
+
     register_boe_tools(mcp)
 except ImportError:
     # BOE integration not available

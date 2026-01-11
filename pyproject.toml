@@ -1,0 +1,50 @@
+[project]
+name = "datos-gob-es-mcp"
+version = "1.0.0"
+description = "MCP server for Spanish open data (datos.gob.es, INE, AEMET, BOE)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "SIM102", # Nested if statements (sometimes clearer)
+    "SIM105", # contextlib.suppress (explicit try/except is clearer)
+    "SIM108", # Ternary operator (sometimes less readable)
+    "SIM117", # Nested with statements (clearer in some cases)
+    "B007",   # Unused loop variable (prefixed with _ is fine)
+    "B905",   # zip strict (Python 3.10+ only, we support 3.10)
+    "C401",   # Unnecessary generator (minor optimization)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# server.py has imports after normalize_text function (needed for startup performance)
+"server.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::RuntimeWarning:asyncio.tasks",
+]
+
+[tool.coverage.run]
+source = ["."]
+omit = ["tests/*", ".venv/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

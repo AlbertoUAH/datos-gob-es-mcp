@@ -1,8 +1,9 @@
 """Tests for the DatosGobClient HTTP client."""
 
-import pytest
 import httpx
+import pytest
 import respx
+
 from server import DatosGobClient, DatosGobClientError, PaginationParams
 
 
@@ -110,10 +111,7 @@ class TestDatosGobClient:
     @pytest.mark.asyncio
     async def test_get_datasets_by_date_range(self, client, mock_api):
         """Test get_datasets_by_date_range method."""
-        result = await client.get_datasets_by_date_range(
-            "2024-01-01T00:00Z",
-            "2024-12-31T23:59Z"
-        )
+        result = await client.get_datasets_by_date_range("2024-01-01T00:00Z", "2024-12-31T23:59Z")
 
         assert "result" in result
 

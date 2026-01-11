@@ -1,7 +1,8 @@
 """Tests for Pydantic models."""
 
 import pytest
-from server import PaginationParams, DatasetSummary, DistributionSummary
+
+from server import DatasetSummary, DistributionSummary, PaginationParams
 
 
 class TestPaginationParams:
@@ -53,10 +54,7 @@ class TestDatasetSummary:
         """Test parsing when title is a list - default lang=es filters to Spanish."""
         item = {
             "_about": "test-uri",
-            "title": [
-                {"_value": "Title 1", "_lang": "es"},
-                {"_value": "Title 2", "_lang": "en"}
-            ]
+            "title": [{"_value": "Title 1", "_lang": "es"}, {"_value": "Title 2", "_lang": "en"}],
         }
         # Default lang="es" filters to Spanish title only
         summary = DatasetSummary.from_api_item(item)
@@ -66,10 +64,7 @@ class TestDatasetSummary:
         """Test parsing when title is a list - lang=None returns all titles."""
         item = {
             "_about": "test-uri",
-            "title": [
-                {"_value": "Title 1", "_lang": "es"},
-                {"_value": "Title 2", "_lang": "en"}
-            ]
+            "title": [{"_value": "Title 1", "_lang": "es"}, {"_value": "Title 2", "_lang": "en"}],
         }
         # lang=None returns all titles
         summary = DatasetSummary.from_api_item(item, lang=None)
@@ -77,28 +72,19 @@ class TestDatasetSummary:
 
     def test_from_api_item_with_string_title(self):
         """Test parsing when title is a plain string."""
-        item = {
-            "_about": "test-uri",
-            "title": "Plain Title"
-        }
+        item = {"_about": "test-uri", "title": "Plain Title"}
         summary = DatasetSummary.from_api_item(item)
         assert summary.title == "Plain Title"
 
     def test_from_api_item_with_string_theme(self):
         """Test parsing when theme is a string."""
-        item = {
-            "_about": "test-uri",
-            "theme": "economia"
-        }
+        item = {"_about": "test-uri", "theme": "economia"}
         summary = DatasetSummary.from_api_item(item)
         assert summary.theme == ["economia"]
 
     def test_from_api_item_with_dict_distribution(self):
         """Test parsing when distribution is a dict (single item)."""
-        item = {
-            "_about": "test-uri",
-            "distribution": {"_about": "dist-1", "format": "csv"}
-        }
+        item = {"_about": "test-uri", "distribution": {"_about": "dist-1", "format": "csv"}}
         summary = DatasetSummary.from_api_item(item)
         assert summary.distributions_count == 1
 
@@ -120,10 +106,7 @@ class TestDatasetSummary:
 
     def test_extract_keywords_list_of_dicts(self):
         """Test keyword extraction from list of dicts."""
-        keywords = [
-            {"_value": "keyword1", "_lang": "es"},
-            {"_value": "keyword2", "_lang": "en"}
-        ]
+        keywords = [{"_value": "keyword1", "_lang": "es"}, {"_value": "keyword2", "_lang": "en"}]
         result = DatasetSummary._extract_keywords(keywords)
         assert result == ["keyword1", "keyword2"]
 
@@ -151,7 +134,7 @@ class TestDistributionSummary:
         item = {
             "_about": "dist-uri",
             "title": "Plain Title",
-            "accessURL": "https://example.com/data.csv"
+            "accessURL": "https://example.com/data.csv",
         }
         summary = DistributionSummary.from_api_item(item)
         assert summary.title == "Plain Title"
@@ -160,10 +143,7 @@ class TestDistributionSummary:
         """Test parsing when title is a list."""
         item = {
             "_about": "dist-uri",
-            "title": [
-                {"_value": "Title 1", "_lang": "es"},
-                {"_value": "Title 2", "_lang": "en"}
-            ]
+            "title": [{"_value": "Title 1", "_lang": "es"}, {"_value": "Title 2", "_lang": "en"}],
         }
         summary = DistributionSummary.from_api_item(item)
         assert summary.title == "Title 1"

@@ -7,10 +7,7 @@ Este prompt proporciona documentacion completa de todas las herramientas
 disponibles con ejemplos de uso practicos."""
 
 
-def generate_prompt(
-    tool_category: str = "all",
-    include_examples: bool = True
-) -> str:
+def generate_prompt(tool_category: str = "all", include_examples: bool = True) -> str:
     """
     Generate the tools documentation prompt.
 

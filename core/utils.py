@@ -41,9 +41,7 @@ def extract_uri_suffix(value: Any) -> str | None:
     return None
 
 
-def extract_dict_value(
-    obj: Any, keys: list[str] | None = None, default: Any = None
-) -> Any:
+def extract_dict_value(obj: Any, keys: list[str] | None = None, default: Any = None) -> Any:
     """Extract value from dict trying multiple keys, or return as-is.
 
     Args:

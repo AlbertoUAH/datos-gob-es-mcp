@@ -1,9 +1,9 @@
 """Pytest fixtures and configuration for datos-gob-es-mcp tests."""
 
-import pytest
-import httpx
-import respx
 from typing import Any
+
+import pytest
+import respx
 
 # Sample API responses for mocking
 SAMPLE_DATASET_ITEM = {
@@ -12,16 +12,10 @@ SAMPLE_DATASET_ITEM = {
     "description": {"_value": "A test dataset description", "_lang": "es"},
     "publisher": {"_about": "https://datos.gob.es/recurso/sector-publico/org/E00003901"},
     "theme": ["http://datos.gob.es/kos/sector-publico/sector/economia"],
-    "keyword": [
-        {"_value": "test", "_lang": "es"},
-        {"_value": "datos", "_lang": "es"}
-    ],
+    "keyword": [{"_value": "test", "_lang": "es"}, {"_value": "datos", "_lang": "es"}],
     "issued": "2024-01-15T10:00:00Z",
     "modified": "2024-06-20T15:30:00Z",
-    "distribution": [
-        {"_about": "dist-1", "format": "csv"},
-        {"_about": "dist-2", "format": "json"}
-    ]
+    "distribution": [{"_about": "dist-1", "format": "csv"}, {"_about": "dist-2", "format": "json"}],
 }
 
 SAMPLE_DISTRIBUTION_ITEM = {
@@ -29,38 +23,40 @@ SAMPLE_DISTRIBUTION_ITEM = {
     "title": {"_value": "CSV Distribution", "_lang": "es"},
     "accessURL": "https://example.com/data.csv",
     "format": "text/csv",
-    "mediaType": "text/csv"
+    "mediaType": "text/csv",
 }
 
 SAMPLE_THEME_ITEM = {
     "_about": "http://datos.gob.es/kos/sector-publico/sector/economia",
-    "label": {"_value": "Economía", "_lang": "es"}
+    "label": {"_value": "Economía", "_lang": "es"},
 }
 
 SAMPLE_PUBLISHER_ITEM = {
     "_about": "https://datos.gob.es/recurso/sector-publico/org/E00003901",
-    "title": {"_value": "AEMET", "_lang": "es"}
+    "title": {"_value": "AEMET", "_lang": "es"},
 }
 
 SAMPLE_PROVINCE_ITEM = {
     "_about": "https://datos.gob.es/recurso/sector-publico/territorio/Provincia/Madrid",
-    "label": {"_value": "Madrid", "_lang": "es"}
+    "label": {"_value": "Madrid", "_lang": "es"},
 }
 
 SAMPLE_REGION_ITEM = {
     "_about": "https://datos.gob.es/recurso/sector-publico/territorio/Autonomous-region/Comunidad-Madrid",
-    "label": {"_value": "Comunidad de Madrid", "_lang": "es"}
+    "label": {"_value": "Comunidad de Madrid", "_lang": "es"},
 }
 
 
-def create_api_response(items: list[dict[str, Any]], page: int = 0, items_per_page: int = 10) -> dict[str, Any]:
+def create_api_response(
+    items: list[dict[str, Any]], page: int = 0, items_per_page: int = 10
+) -> dict[str, Any]:
     """Create a mock API response with the given items."""
     return {
         "result": {
             "items": items,
             "page": page,
             "itemsPerPage": items_per_page,
-            "totalResults": len(items)
+            "totalResults": len(items),
         }
     }
 
@@ -69,8 +65,6 @@ def create_api_response(items: list[dict[str, Any]], page: int = 0, items_per_pa
 def mock_api():
     """Fixture to mock the datos.gob.es API using respx."""
     with respx.mock(assert_all_called=False) as mock:
-        base_url = "https://datos.gob.es/apidata/"
-
         # Catch-all for dataset endpoints (using a more permissive pattern)
         mock.get(url__regex=r".*/catalog/dataset\.json.*").respond(
             json=create_api_response([SAMPLE_DATASET_ITEM])

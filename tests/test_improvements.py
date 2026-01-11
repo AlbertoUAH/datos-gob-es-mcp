@@ -1,11 +1,9 @@
 """Tests for the improvements implemented."""
 
 import asyncio
-import json
 import pickle
 import time
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -18,24 +16,26 @@ class TestMetadataCache:
     def mock_client(self):
         """Create a mock DatosGobClient."""
         client = AsyncMock()
-        client.list_publishers = AsyncMock(return_value={
-            "result": {"items": [{"_about": "pub1", "title": "Publisher 1"}]}
-        })
-        client.list_themes = AsyncMock(return_value={
-            "result": {"items": [{"_about": "theme1", "label": "Theme 1"}]}
-        })
-        client.list_provinces = AsyncMock(return_value={
-            "result": {"items": [{"_about": "prov1", "label": "Madrid"}]}
-        })
-        client.list_autonomous_regions = AsyncMock(return_value={
-            "result": {"items": [{"_about": "region1", "label": "Comunidad de Madrid"}]}
-        })
-        client.list_public_sectors = AsyncMock(return_value={
-            "result": {"items": [{"_about": "sector1", "label": "Economy"}]}
-        })
-        client.list_spatial_coverage = AsyncMock(return_value={
-            "result": {"items": [{"_about": "spatial1", "label": "Spain"}]}
-        })
+        client.list_publishers = AsyncMock(
+            return_value={"result": {"items": [{"_about": "pub1", "title": "Publisher 1"}]}}
+        )
+        client.list_themes = AsyncMock(
+            return_value={"result": {"items": [{"_about": "theme1", "label": "Theme 1"}]}}
+        )
+        client.list_provinces = AsyncMock(
+            return_value={"result": {"items": [{"_about": "prov1", "label": "Madrid"}]}}
+        )
+        client.list_autonomous_regions = AsyncMock(
+            return_value={
+                "result": {"items": [{"_about": "region1", "label": "Comunidad de Madrid"}]}
+            }
+        )
+        client.list_public_sectors = AsyncMock(
+            return_value={"result": {"items": [{"_about": "sector1", "label": "Economy"}]}}
+        )
+        client.list_spatial_coverage = AsyncMock(
+            return_value={"result": {"items": [{"_about": "spatial1", "label": "Spain"}]}}
+        )
         return client
 
     @pytest.fixture
@@ -127,7 +127,7 @@ class TestParallelPagination:
     @pytest.mark.asyncio
     async def test_fetch_all_pages_parallel(self):
         """Should fetch multiple pages in parallel."""
-        from server import _fetch_all_pages, PaginationParams
+        from server import PaginationParams, _fetch_all_pages
 
         call_count = 0
         call_times = []
@@ -154,7 +154,7 @@ class TestParallelPagination:
     @pytest.mark.asyncio
     async def test_handles_partial_results(self):
         """Should handle when last page has fewer items."""
-        from server import _fetch_all_pages, PaginationParams, DEFAULT_PAGE_SIZE
+        from server import DEFAULT_PAGE_SIZE, PaginationParams, _fetch_all_pages
 
         async def mock_fetch(pagination: PaginationParams):
             page = pagination.page
@@ -272,16 +272,17 @@ class TestIntegration:
         from server import search
 
         # search is decorated with @mcp.tool(), so check description
-        if hasattr(search, 'description'):
+        if hasattr(search, "description"):
             assert "themes" in search.description
         else:
             # Or check the underlying function
-            assert hasattr(search, 'fn') or True  # Pass if wrapped
+            assert hasattr(search, "fn") or True  # Pass if wrapped
 
     def test_filter_datasets_locally_signature(self):
         """_filter_datasets_locally should accept themes parameter."""
-        from server import _filter_datasets_locally
         import inspect
+
+        from server import _filter_datasets_locally
 
         sig = inspect.signature(_filter_datasets_locally)
         params = sig.parameters

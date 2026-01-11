@@ -7,11 +7,7 @@ Este prompt te guia para encontrar datasets de una tematica especifica
 disponibles en un formato determinado."""
 
 
-def generate_prompt(
-    tema: str = "economia",
-    formato: str = "csv",
-    max_resultados: int = 10
-) -> str:
+def generate_prompt(tema: str = "economia", formato: str = "csv", max_resultados: int = 10) -> str:
     """
     Genera el prompt de busqueda por tema y formato.
 

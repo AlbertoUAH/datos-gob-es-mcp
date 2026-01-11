@@ -7,11 +7,7 @@ Este prompt te guía para encontrar los datasets que han sido
 actualizados o publicados en los últimos días."""
 
 
-def generate_prompt(
-    dias: int = 30,
-    tema: str | None = None,
-    max_resultados: int = 15
-) -> str:
+def generate_prompt(dias: int = 30, tema: str | None = None, max_resultados: int = 15) -> str:
     """
     Genera el prompt de búsqueda de datasets recientes.
 
@@ -21,9 +17,13 @@ def generate_prompt(
         max_resultados: Número máximo de resultados
     """
     filtro_tema = f" sobre **{tema}**" if tema else ""
-    instruccion_tema = f"""
+    instruccion_tema = (
+        f"""
 ### Paso 2: Filtrar por temática (opcional)
-Si deseas filtrar por tema "{tema}", usa `get_datasets_by_theme` con los resultados.""" if tema else ""
+Si deseas filtrar por tema "{tema}", usa `get_datasets_by_theme` con los resultados."""
+        if tema
+        else ""
+    )
 
     return f"""# Búsqueda de Datasets Actualizados Recientemente
 

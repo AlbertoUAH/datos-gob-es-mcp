@@ -1,7 +1,9 @@
 """Tests for MCP tools."""
 
 import json
+
 import pytest
+
 from server import (
     get,
     search,
@@ -10,7 +12,7 @@ from server import (
 
 def get_tool_fn(tool):
     """Extract the underlying async function from a FastMCP tool."""
-    if hasattr(tool, 'fn'):
+    if hasattr(tool, "fn"):
         return tool.fn
     return tool
 
@@ -87,10 +89,7 @@ class TestDatasetTools:
     async def test_search_by_date_range(self, mock_api):
         """Test search with date range filter."""
         fn = get_tool_fn(search)
-        result = await fn(
-            date_start="2024-01-01T00:00Z",
-            date_end="2024-12-31T23:59Z"
-        )
+        result = await fn(date_start="2024-01-01T00:00Z", date_end="2024-12-31T23:59Z")
         data = json.loads(result)
 
         assert "datasets" in data

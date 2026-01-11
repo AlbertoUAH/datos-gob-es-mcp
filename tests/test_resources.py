@@ -1,19 +1,21 @@
 """Tests for MCP resources."""
 
 import json
+
 import pytest
+
 from server import (
     resource_dataset,
-    resource_theme_datasets,
-    resource_publisher_datasets,
     resource_format_datasets,
     resource_keyword_datasets,
+    resource_publisher_datasets,
+    resource_theme_datasets,
 )
 
 
 def get_resource_fn(resource):
     """Extract the underlying async function from a FastMCP resource."""
-    if hasattr(resource, 'fn'):
+    if hasattr(resource, "fn"):
         return resource.fn
     return resource
 

@@ -1,7 +1,6 @@
 """Tests for MCP prompts."""
 
-import pytest
-from prompts import buscar_por_tema, datasets_recientes, explorar_catalogo, analisis_dataset
+from prompts import analisis_dataset, buscar_por_tema, datasets_recientes, explorar_catalogo
 
 
 class TestBuscarPorTemaPrompt:
@@ -18,11 +17,7 @@ class TestBuscarPorTemaPrompt:
 
     def test_generate_prompt_custom_values(self):
         """Test prompt generation with custom values."""
-        result = buscar_por_tema.generate_prompt(
-            tema="salud",
-            formato="json",
-            max_resultados=25
-        )
+        result = buscar_por_tema.generate_prompt(tema="salud", formato="json", max_resultados=25)
 
         assert "salud" in result
         assert "json" in result
@@ -57,11 +52,7 @@ class TestDatasetsRecientesPrompt:
 
     def test_generate_prompt_with_theme(self):
         """Test prompt generation with theme filter."""
-        result = datasets_recientes.generate_prompt(
-            dias=7,
-            tema="educacion",
-            max_resultados=10
-        )
+        result = datasets_recientes.generate_prompt(dias=7, tema="educacion", max_resultados=10)
 
         assert "7" in result
         assert "educacion" in result
@@ -93,9 +84,7 @@ class TestExplorarCatalogoPrompt:
 
     def test_generate_prompt_custom_interest(self):
         """Test prompt generation with custom interest."""
-        result = explorar_catalogo.generate_prompt(
-            interes="datos de turismo en Barcelona"
-        )
+        result = explorar_catalogo.generate_prompt(interes="datos de turismo en Barcelona")
 
         assert "datos de turismo en Barcelona" in result
 
@@ -136,47 +125,33 @@ class TestAnalisisDatasetPrompt:
 
     def test_generate_prompt_with_dataset_id(self):
         """Test prompt generation with dataset ID."""
-        result = analisis_dataset.generate_prompt(
-            dataset_id="test-dataset-123"
-        )
+        result = analisis_dataset.generate_prompt(dataset_id="test-dataset-123")
 
         assert "test-dataset-123" in result
 
     def test_generate_prompt_with_distributions(self):
         """Test prompt with distribution analysis enabled."""
-        result = analisis_dataset.generate_prompt(
-            dataset_id="test",
-            incluir_distribuciones=True
-        )
+        result = analisis_dataset.generate_prompt(dataset_id="test", incluir_distribuciones=True)
 
         assert "Análisis de Distribuciones" in result
         assert "get_distributions_by_dataset" in result
 
     def test_generate_prompt_without_distributions(self):
         """Test prompt with distribution analysis disabled."""
-        result = analisis_dataset.generate_prompt(
-            dataset_id="test",
-            incluir_distribuciones=False
-        )
+        result = analisis_dataset.generate_prompt(dataset_id="test", incluir_distribuciones=False)
 
         assert "Análisis de Distribuciones" not in result
 
     def test_generate_prompt_with_quality_evaluation(self):
         """Test prompt with quality evaluation enabled."""
-        result = analisis_dataset.generate_prompt(
-            dataset_id="test",
-            evaluar_calidad=True
-        )
+        result = analisis_dataset.generate_prompt(dataset_id="test", evaluar_calidad=True)
 
         assert "Evaluación de Calidad" in result
         assert "Puntuación" in result
 
     def test_generate_prompt_without_quality_evaluation(self):
         """Test prompt with quality evaluation disabled."""
-        result = analisis_dataset.generate_prompt(
-            dataset_id="test",
-            evaluar_calidad=False
-        )
+        result = analisis_dataset.generate_prompt(dataset_id="test", evaluar_calidad=False)
 
         assert "Evaluación de Calidad" not in result
 

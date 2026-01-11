@@ -8,9 +8,7 @@ el INE (Instituto Nacional de Estadistica) como en datos.gob.es."""
 
 
 def generate_prompt(
-    tema: str = "empleo",
-    incluir_ine: bool = True,
-    incluir_datos_gob: bool = True
+    tema: str = "empleo", incluir_ine: bool = True, incluir_datos_gob: bool = True
 ) -> str:
     """
     Genera el prompt de busqueda de estadisticas.

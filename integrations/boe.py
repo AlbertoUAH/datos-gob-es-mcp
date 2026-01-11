@@ -8,13 +8,13 @@ import json
 from datetime import datetime
 from typing import Any
 
-from core import get_logger, BaseAPIClient, BOEClientError, handle_api_error
+from core import BaseAPIClient, BOEClientError, get_logger, handle_api_error
 from core.config import (
     BOE_BASE_URL,
-    BOE_DEFAULT_SEARCH_DAYS,
-    BOE_MAX_SEARCH_DAYS,
     BOE_BATCH_SIZE,
+    BOE_DEFAULT_SEARCH_DAYS,
     BOE_MAX_RESULTS,
+    BOE_MAX_SEARCH_DAYS,
 )
 
 logger = get_logger("boe")
@@ -31,16 +31,11 @@ class BOEClient(BaseAPIClient):
     ERROR_CLASS = BOEClientError
 
     async def _request(
-        self,
-        endpoint: str,
-        params: dict[str, Any] | None = None,
-        response_format: str = "json"
+        self, endpoint: str, params: dict[str, Any] | None = None, response_format: str = "json"
     ) -> Any:
         """Make an async HTTP request to the BOE API with logging and rate limiting."""
         # BOE API requires Accept header for format (not query param)
-        headers = {
-            "Accept": "application/json" if response_format == "json" else "application/xml"
-        }
+        headers = {"Accept": "application/json" if response_format == "json" else "application/xml"}
 
         try:
             response = await self.http.get(endpoint, params=params, headers=headers)
@@ -51,7 +46,7 @@ class BOEClient(BaseAPIClient):
 
         except Exception as e:
             logger.warning("boe_request_error", endpoint=endpoint, error=str(e))
-            if hasattr(e, 'status_code'):
+            if hasattr(e, "status_code"):
                 raise BOEClientError(str(e), status_code=e.status_code) from e
             raise BOEClientError(str(e)) from e
 
@@ -174,11 +169,15 @@ def _format_summary(summary: dict[str, Any]) -> dict[str, Any]:
 
             for epigrafe in dept.get("departamento_epigrafe", []):
                 for item in epigrafe.get("item", []):
-                    dept_info["epigrafes"].append({
-                        "id": item.get("identificador"),
-                        "titulo": item.get("titulo"),
-                        "url_pdf": item.get("url_pdf", {}).get("texto") if isinstance(item.get("url_pdf"), dict) else item.get("url_pdf"),
-                    })
+                    dept_info["epigrafes"].append(
+                        {
+                            "id": item.get("identificador"),
+                            "titulo": item.get("titulo"),
+                            "url_pdf": item.get("url_pdf", {}).get("texto")
+                            if isinstance(item.get("url_pdf"), dict)
+                            else item.get("url_pdf"),
+                        }
+                    )
 
             if dept_info["epigrafes"]:
                 seccion_info["departamentos"].append(dept_info)
@@ -208,12 +207,20 @@ def _format_document(doc: dict[str, Any]) -> dict[str, Any]:
         "id": meta.get("identificador"),
         "titulo": meta.get("titulo"),
         "fecha_publicacion": meta.get("fecha_publicacion"),
-        "departamento": meta.get("departamento", {}).get("texto") if isinstance(meta.get("departamento"), dict) else meta.get("departamento"),
-        "rango": meta.get("rango", {}).get("texto") if isinstance(meta.get("rango"), dict) else meta.get("rango"),
+        "departamento": meta.get("departamento", {}).get("texto")
+        if isinstance(meta.get("departamento"), dict)
+        else meta.get("departamento"),
+        "rango": meta.get("rango", {}).get("texto")
+        if isinstance(meta.get("rango"), dict)
+        else meta.get("rango"),
         "seccion": meta.get("seccion"),
         "origen_legislativo": meta.get("origen_legislativo"),
-        "url_pdf": meta.get("url_pdf", {}).get("texto") if isinstance(meta.get("url_pdf"), dict) else meta.get("url_pdf"),
-        "url_html": meta.get("url_html", {}).get("texto") if isinstance(meta.get("url_html"), dict) else meta.get("url_html"),
+        "url_pdf": meta.get("url_pdf", {}).get("texto")
+        if isinstance(meta.get("url_pdf"), dict)
+        else meta.get("url_pdf"),
+        "url_html": meta.get("url_html", {}).get("texto")
+        if isinstance(meta.get("url_html"), dict)
+        else meta.get("url_html"),
         "materias": analisis.get("materias", []) if analisis else [],
         "notas": analisis.get("notas", []) if analisis else [],
     }
@@ -258,52 +265,76 @@ def register_boe_tools(mcp):
                         if data:
                             formatted = _format_summary(data)
                             if i == 0:
-                                formatted["note"] = f"BOE de hoy ({check_date.strftime('%d/%m/%Y')})"
+                                formatted["note"] = (
+                                    f"BOE de hoy ({check_date.strftime('%d/%m/%Y')})"
+                                )
                             else:
-                                formatted["note"] = f"BOE mas reciente: {check_date.strftime('%d/%m/%Y')} (hace {i} dias)"
+                                formatted["note"] = (
+                                    f"BOE mas reciente: {check_date.strftime('%d/%m/%Y')} (hace {i} dias)"
+                                )
                             return json.dumps(formatted, ensure_ascii=False, indent=2)
                     except BOEClientError as e:
                         logger.info("boe_date_not_available", date=date_str, error=str(e))
                         continue
 
-                return json.dumps({
-                    "error": "No BOE available in the last 7 days",
-                    "dates_tried": dates_tried,
-                    "today": today.strftime("%Y%m%d"),
-                    "reason": "This may happen during extended holiday periods (e.g., Christmas, New Year).",
-                }, ensure_ascii=False, indent=2)
+                return json.dumps(
+                    {
+                        "error": "No BOE available in the last 7 days",
+                        "dates_tried": dates_tried,
+                        "today": today.strftime("%Y%m%d"),
+                        "reason": "This may happen during extended holiday periods (e.g., Christmas, New Year).",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
             # Validate date format
             if len(date) != 8 or not date.isdigit():
-                return json.dumps({
-                    "error": "Invalid date format. Use YYYYMMDD (e.g., '20250102')",
-                    "provided": date,
-                }, ensure_ascii=False, indent=2)
+                return json.dumps(
+                    {
+                        "error": "Invalid date format. Use YYYYMMDD (e.g., '20250102')",
+                        "provided": date,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
             # Validate it's a real date
             try:
                 parsed_date = datetime.strptime(date, "%Y%m%d")
                 # Check if weekend
                 if parsed_date.weekday() >= 5:  # 5=Saturday, 6=Sunday
-                    return json.dumps({
-                        "warning": f"Date {date} is a weekend. BOE is not published on weekends.",
-                        "suggestion": "Try calling boe_get_summary() without a date to get the most recent BOE.",
-                    }, ensure_ascii=False, indent=2)
+                    return json.dumps(
+                        {
+                            "warning": f"Date {date} is a weekend. BOE is not published on weekends.",
+                            "suggestion": "Try calling boe_get_summary() without a date to get the most recent BOE.",
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
             except ValueError:
-                return json.dumps({
-                    "error": f"Invalid date: {date}. Check year, month, and day values.",
-                }, ensure_ascii=False, indent=2)
+                return json.dumps(
+                    {
+                        "error": f"Invalid date: {date}. Check year, month, and day values.",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
             data = await boe_client.get_summary(date)
             formatted = _format_summary(data)
             return json.dumps(formatted, ensure_ascii=False, indent=2)
         except BOEClientError as e:
             if e.status_code == 404 or "404" in str(e):
-                return json.dumps({
-                    "error": f"No BOE available for date {date}",
-                    "reason": "This date may be a public holiday or the BOE was not published.",
-                    "suggestion": "Try calling boe_get_summary() without a date to get the most recent BOE.",
-                }, ensure_ascii=False, indent=2)
+                return json.dumps(
+                    {
+                        "error": f"No BOE available for date {date}",
+                        "reason": "This date may be a public holiday or the BOE was not published.",
+                        "suggestion": "Try calling boe_get_summary() without a date to get the most recent BOE.",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
             return _handle_error(e, context="boe_get_summary")
         except Exception as e:
             return _handle_error(e, context="boe_get_summary")
@@ -383,9 +414,11 @@ def register_boe_tools(mcp):
             batch_size = BOE_BATCH_SIZE
             all_summaries = []
             for i in range(0, len(dates_to_check), batch_size):
-                batch = dates_to_check[i:i + batch_size]
+                batch = dates_to_check[i : i + batch_size]
                 batch_results = await asyncio.gather(*[fetch_summary(d) for d in batch])
-                all_summaries.extend([(dates_to_check[i + j], r) for j, r in enumerate(batch_results) if r])
+                all_summaries.extend(
+                    [(dates_to_check[i + j], r) for j, r in enumerate(batch_results) if r]
+                )
 
             # Search in all summaries
             results = []
@@ -397,13 +430,15 @@ def register_boe_tools(mcp):
                         for epigrafe in dept.get("epigrafes", []):
                             titulo = epigrafe.get("titulo", "")
                             if query_lower in titulo.lower():
-                                results.append({
-                                    "id": epigrafe.get("id"),
-                                    "titulo": titulo,
-                                    "fecha": formatted.get("fecha"),
-                                    "seccion": seccion.get("nombre"),
-                                    "departamento": dept.get("nombre"),
-                                })
+                                results.append(
+                                    {
+                                        "id": epigrafe.get("id"),
+                                        "titulo": titulo,
+                                        "fecha": formatted.get("fecha"),
+                                        "seccion": seccion.get("nombre"),
+                                        "departamento": dept.get("nombre"),
+                                    }
+                                )
                                 if len(results) >= BOE_MAX_RESULTS:
                                     break
 

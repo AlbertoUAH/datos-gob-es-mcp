@@ -12,13 +12,13 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from core import get_logger, HTTPClient, AEMETClientError, handle_api_error
+from core import AEMETClientError, HTTPClient, get_logger, handle_api_error
 from core.config import (
     AEMET_BASE_URL,
-    HTTP_DEFAULT_TIMEOUT,
     AEMET_MAX_FORECAST_DAYS,
-    AEMET_MAX_OBSERVATIONS,
     AEMET_MAX_MUNICIPALITIES,
+    AEMET_MAX_OBSERVATIONS,
+    HTTP_DEFAULT_TIMEOUT,
 )
 
 # Load environment variables
@@ -81,7 +81,7 @@ class AEMETClient:
                 data_http = HTTPClient("aemet_data", "", self.timeout, rate_limit=False)
                 data_response = await data_http.get(data_url, headers=headers)
                 # AEMET returns data in Latin-1 encoding, not UTF-8
-                content = data_response.content.decode('latin-1')
+                content = data_response.content.decode("latin-1")
                 return json.loads(content)
 
             return result
@@ -89,7 +89,7 @@ class AEMETClient:
         except AEMETClientError:
             raise
         except Exception as e:
-            if hasattr(e, 'status_code'):
+            if hasattr(e, "status_code"):
                 raise AEMETClientError(str(e), status_code=e.status_code) from e
             raise AEMETClientError(str(e)) from e
 
@@ -168,14 +168,24 @@ def _format_forecast(forecast_data: list[dict[str, Any]]) -> dict[str, Any]:
 
     formatted_days = []
     for dia in dias[:AEMET_MAX_FORECAST_DAYS]:  # Max forecast days
-        formatted_days.append({
-            "fecha": dia.get("fecha"),
-            "temp_max": dia.get("temperatura", {}).get("maxima") if isinstance(dia.get("temperatura"), dict) else None,
-            "temp_min": dia.get("temperatura", {}).get("minima") if isinstance(dia.get("temperatura"), dict) else None,
-            "estado_cielo": dia.get("estadoCielo", [{}])[0].get("descripcion") if dia.get("estadoCielo") else None,
-            "prob_precipitacion": dia.get("probPrecipitacion", [{}])[0].get("value") if dia.get("probPrecipitacion") else None,
-            "viento": dia.get("viento", [{}])[0] if dia.get("viento") else None,
-        })
+        formatted_days.append(
+            {
+                "fecha": dia.get("fecha"),
+                "temp_max": dia.get("temperatura", {}).get("maxima")
+                if isinstance(dia.get("temperatura"), dict)
+                else None,
+                "temp_min": dia.get("temperatura", {}).get("minima")
+                if isinstance(dia.get("temperatura"), dict)
+                else None,
+                "estado_cielo": dia.get("estadoCielo", [{}])[0].get("descripcion")
+                if dia.get("estadoCielo")
+                else None,
+                "prob_precipitacion": dia.get("probPrecipitacion", [{}])[0].get("value")
+                if dia.get("probPrecipitacion")
+                else None,
+                "viento": dia.get("viento", [{}])[0] if dia.get("viento") else None,
+            }
+        )
 
     return {
         "municipio": forecast.get("nombre"),
@@ -231,20 +241,24 @@ def register_aemet_tools(mcp):
 
             # Format observations
             observations = []
-            for obs in (data[:AEMET_MAX_OBSERVATIONS] if isinstance(data, list) else [data]):  # Limit results
-                observations.append({
-                    "estacion": obs.get("ubi"),
-                    "id": obs.get("idema"),
-                    "fecha": obs.get("fint"),
-                    "temperatura": obs.get("ta"),
-                    "temp_max": obs.get("tamax"),
-                    "temp_min": obs.get("tamin"),
-                    "humedad": obs.get("hr"),
-                    "presion": obs.get("pres"),
-                    "viento_vel": obs.get("vv"),
-                    "viento_dir": obs.get("dv"),
-                    "precipitacion": obs.get("prec"),
-                })
+            for obs in (
+                data[:AEMET_MAX_OBSERVATIONS] if isinstance(data, list) else [data]
+            ):  # Limit results
+                observations.append(
+                    {
+                        "estacion": obs.get("ubi"),
+                        "id": obs.get("idema"),
+                        "fecha": obs.get("fint"),
+                        "temperatura": obs.get("ta"),
+                        "temp_max": obs.get("tamax"),
+                        "temp_min": obs.get("tamin"),
+                        "humedad": obs.get("hr"),
+                        "presion": obs.get("pres"),
+                        "viento_vel": obs.get("vv"),
+                        "viento_dir": obs.get("dv"),
+                        "precipitacion": obs.get("prec"),
+                    }
+                )
 
             output = {
                 "total_stations": len(observations),
@@ -299,9 +313,12 @@ def register_aemet_tools(mcp):
                 }
 
             if not output:
-                return json.dumps({
-                    "error": f"Invalid location_type: {location_type}. Use 'municipalities', 'stations', or 'all'."
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "error": f"Invalid location_type: {location_type}. Use 'municipalities', 'stations', or 'all'."
+                    },
+                    ensure_ascii=False,
+                )
 
             return json.dumps(output, ensure_ascii=False, indent=2)
         except Exception as e:

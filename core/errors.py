@@ -25,8 +25,6 @@ def handle_api_error(
     logger.warning(f"{logger_name}_error", context=context, error=str(e))
 
     if isinstance(e, APIClientError):
-        return json.dumps(
-            {"error": e.message, "status_code": e.status_code}, ensure_ascii=False
-        )
+        return json.dumps({"error": e.message, "status_code": e.status_code}, ensure_ascii=False)
 
     return json.dumps({"error": str(e)}, ensure_ascii=False)

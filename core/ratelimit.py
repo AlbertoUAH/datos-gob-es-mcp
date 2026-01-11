@@ -25,9 +25,9 @@ class RateLimitExceededError(Exception):
 # Default rate limits (requests per second)
 DEFAULT_LIMITS: dict[str, float] = {
     "datos.gob.es": 10.0,  # Main API - 10 req/s
-    "ine": 5.0,            # INE API - 5 req/s (conservative)
-    "aemet": 10.0,         # AEMET API - 10 req/s
-    "boe": 10.0,           # BOE API - 10 req/s
+    "ine": 5.0,  # INE API - 5 req/s (conservative)
+    "aemet": 10.0,  # AEMET API - 10 req/s
+    "boe": 10.0,  # BOE API - 10 req/s
 }
 
 
@@ -102,13 +102,13 @@ class RateLimiter:
         limiter = cls.get_limiter(api_name)
         try:
             await asyncio.wait_for(limiter.acquire(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             logger.warning(
                 "rate_limit_timeout",
                 api=api_name,
                 timeout=timeout,
             )
-            raise RateLimitExceededError(api_name, timeout)
+            raise RateLimitExceededError(api_name, timeout) from e
 
     @classmethod
     def reset(cls, api_name: str | None = None) -> None:

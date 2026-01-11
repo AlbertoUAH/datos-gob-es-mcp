@@ -1,6 +1,13 @@
 """MCP Prompts para datos.gob.es - Guias de busqueda detalladas."""
 
-from . import buscar_por_tema, datasets_recientes, explorar_catalogo, analisis_dataset, guia_herramientas, buscar_estadisticas
+from . import (
+    analisis_dataset,
+    buscar_estadisticas,
+    buscar_por_tema,
+    datasets_recientes,
+    explorar_catalogo,
+    guia_herramientas,
+)
 
 
 def register_prompts(mcp):
@@ -13,9 +20,7 @@ def register_prompts(mcp):
 
     @mcp.prompt()
     def prompt_buscar_datos_por_tema(
-        tema: str = "economia",
-        formato: str = "csv",
-        max_resultados: int = 10
+        tema: str = "economia", formato: str = "csv", max_resultados: int = 10
     ) -> str:
         """
         Búsqueda guiada de datasets por temática y formato.
@@ -32,9 +37,7 @@ def register_prompts(mcp):
 
     @mcp.prompt()
     def prompt_datasets_recientes(
-        dias: int = 30,
-        tema: str | None = None,
-        max_resultados: int = 15
+        dias: int = 30, tema: str | None = None, max_resultados: int = 15
     ) -> str:
         """
         Búsqueda de datasets actualizados recientemente.
@@ -50,9 +53,7 @@ def register_prompts(mcp):
         return datasets_recientes.generate_prompt(dias, tema, max_resultados)
 
     @mcp.prompt()
-    def prompt_explorar_catalogo(
-        interes: str = "datos económicos de España"
-    ) -> str:
+    def prompt_explorar_catalogo(interes: str = "datos económicos de España") -> str:
         """
         Exploración guiada del catálogo de datos abiertos.
 
@@ -66,9 +67,7 @@ def register_prompts(mcp):
 
     @mcp.prompt()
     def prompt_analisis_dataset(
-        dataset_id: str = "",
-        incluir_distribuciones: bool = True,
-        evaluar_calidad: bool = True
+        dataset_id: str = "", incluir_distribuciones: bool = True, evaluar_calidad: bool = True
     ) -> str:
         """
         Análisis detallado de un dataset específico.
@@ -82,15 +81,10 @@ def register_prompts(mcp):
             incluir_distribuciones: Si incluir análisis de distribuciones
             evaluar_calidad: Si incluir evaluación de calidad de datos
         """
-        return analisis_dataset.generate_prompt(
-            dataset_id, incluir_distribuciones, evaluar_calidad
-        )
+        return analisis_dataset.generate_prompt(dataset_id, incluir_distribuciones, evaluar_calidad)
 
     @mcp.prompt()
-    def prompt_guia_herramientas(
-        tool_category: str = "all",
-        include_examples: bool = True
-    ) -> str:
+    def prompt_guia_herramientas(tool_category: str = "all", include_examples: bool = True) -> str:
         """
         Guia interactiva de herramientas MCP con ejemplos de uso.
 
@@ -106,9 +100,7 @@ def register_prompts(mcp):
 
     @mcp.prompt()
     def prompt_buscar_estadisticas(
-        tema: str = "empleo",
-        incluir_ine: bool = True,
-        incluir_datos_gob: bool = True
+        tema: str = "empleo", incluir_ine: bool = True, incluir_datos_gob: bool = True
     ) -> str:
         """
         Busqueda guiada de estadisticas oficiales espanolas.

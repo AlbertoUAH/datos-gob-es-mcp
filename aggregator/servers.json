@@ -1,0 +1,50 @@
+[
+  {
+    "name": "datos_gob",
+    "transport": "stdio",
+    "command": ".venv/bin/python",
+    "args": ["-m", "mcp_datos_gob"],
+    "env": {"PYTHONPATH": "${PROJECT_ROOT}"},
+    "prefix": "dg",
+    "enabled": true
+  },
+  {
+    "name": "ine",
+    "transport": "stdio",
+    "command": ".venv/bin/python",
+    "args": ["-m", "mcp_ine"],
+    "env": {"PYTHONPATH": "${PROJECT_ROOT}"},
+    "prefix": "ine",
+    "enabled": true
+  },
+  {
+    "name": "aemet",
+    "transport": "stdio",
+    "command": ".venv/bin/python",
+    "args": ["-m", "mcp_aemet"],
+    "env": {
+      "PYTHONPATH": "${PROJECT_ROOT}",
+      "AEMET_API_KEY": "${AEMET_API_KEY}"
+    },
+    "prefix": "aemet",
+    "enabled": false
+  },
+  {
+    "name": "boe",
+    "transport": "stdio",
+    "command": ".venv/bin/python",
+    "args": ["-m", "mcp_boe"],
+    "env": {"PYTHONPATH": "${PROJECT_ROOT}"},
+    "prefix": "boe",
+    "enabled": true
+  },
+  {
+    "name": "eurostat",
+    "transport": "stdio",
+    "command": ".venv/bin/python",
+    "args": ["-m", "mcp_eurostat"],
+    "env": {"PYTHONPATH": "${PROJECT_ROOT}"},
+    "prefix": "eu",
+    "enabled": true
+  }
+]

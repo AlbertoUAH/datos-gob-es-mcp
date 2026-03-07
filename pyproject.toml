@@ -1,10 +1,18 @@
 [project]
 name = "datos-gob-es-mcp"
-version = "1.0.0"
-description = "MCP server for Spanish open data (datos.gob.es, INE, AEMET, BOE)"
+version = "1.2.0"
+description = "MCP server for Spanish open data (datos.gob.es, INE, AEMET, BOE, Eurostat)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
+
+[project.scripts]
+datos-gob-mcp = "mcp_datos_gob.__main__:main"
+ine-mcp = "mcp_ine.__main__:main"
+aemet-mcp = "mcp_aemet.__main__:main"
+boe-mcp = "mcp_boe.__main__:main"
+eurostat-mcp = "mcp_eurostat.__main__:main"
+datos-gob-aggregator = "aggregator.__main__:main"
 
 [tool.ruff]
 target-version = "py310"

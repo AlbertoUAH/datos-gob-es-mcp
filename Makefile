@@ -57,6 +57,24 @@ ci:  ## Run full CI pipeline (lint + test)
 	$(MAKE) lint
 	$(MAKE) test
 
+run-aggregator:  ## Start MCP aggregator (SSE at :8001)
+	$(VENV_PYTHON) -m aggregator --port 8001
+
+run-datos-gob:  ## Start mcp_datos_gob in stdio mode
+	PYTHONPATH=. $(VENV_PYTHON) -m mcp_datos_gob
+
+run-ine:  ## Start mcp_ine in stdio mode
+	PYTHONPATH=. $(VENV_PYTHON) -m mcp_ine
+
+run-boe:  ## Start mcp_boe in stdio mode
+	PYTHONPATH=. $(VENV_PYTHON) -m mcp_boe
+
+run-eurostat:  ## Start mcp_eurostat in stdio mode
+	PYTHONPATH=. $(VENV_PYTHON) -m mcp_eurostat
+
+inspect-aggregator:  ## Inspect aggregator tools (requires mcp CLI)
+	$(VENV_DIR)/bin/mcp dev aggregator/__main__.py
+
 # Notebooks
 notebooks:  ## Start Jupyter notebook server for examples
 	$(VENV_PIP) install jupyter pandas matplotlib

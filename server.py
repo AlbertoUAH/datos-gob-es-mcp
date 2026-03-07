@@ -1,3 +1,7 @@
+# DEPRECATED: Use the aggregator instead.
+# Run: python -m aggregator --port 8001
+# This file is kept for backwards compatibility.
+# See aggregator/ for the new modular architecture.
 """MCP server for datos.gob.es open data catalog API."""
 
 import asyncio

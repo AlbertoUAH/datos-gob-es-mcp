@@ -335,8 +335,18 @@ def run_server(
 
     Clients connect to: http://<host>:<port>/sse
     """
-    mcp = build_server(cfg, project_root)
+    _server = build_server(cfg, project_root)
     print("=" * 60)
     print(f"[AGGREGATOR] SSE endpoint: http://{host}:{port}/sse")
     print("=" * 60)
-    mcp.run(transport="sse", host=host, port=port)
+    _server.run(transport="sse", host=host, port=port)
+
+
+# Module-level server object for fastmcp deployments.
+# FastMCP platform requires a top-level variable named mcp, server, or app.
+_project_root = Path(__file__).parents[1].resolve()
+_cfg = AggregatorConfig.from_file(
+    Path(__file__).parent / "servers.json",
+    project_root=str(_project_root),
+)
+mcp = build_server(_cfg, _project_root)

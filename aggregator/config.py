@@ -53,17 +53,27 @@ class AggregatorConfig(BaseModel):
     def from_servers_array(
         cls, arr: List[dict], project_root: str | None = None
     ) -> "AggregatorConfig":
-        """Create configuration from a JSON array, resolving ${PROJECT_ROOT} placeholders."""
+        """Create configuration from a JSON array, resolving ${PROJECT_ROOT} and ${PYTHON_CMD} placeholders."""
+        import sys
+
         servers: Dict[str, ServerSpec] = {}
+        resolve_vars: dict[str, str] = {}
+        if project_root:
+            resolve_vars["PROJECT_ROOT"] = project_root
+        # Default PYTHON_CMD to the current interpreter so sub-MCPs use the same Python.
+        # Can be overridden via the PYTHON_CMD environment variable.
+        if not os.environ.get("PYTHON_CMD"):
+            resolve_vars["PYTHON_CMD"] = sys.executable
+
         for raw in arr:
             if "name" not in raw:
                 continue
             if not raw.get("enabled", True):
                 continue
 
-            # Resolve ${PROJECT_ROOT} placeholders
-            if project_root:
-                raw = _resolve_placeholders(raw, {"PROJECT_ROOT": project_root})
+            # Resolve placeholders
+            if resolve_vars:
+                raw = _resolve_placeholders(raw, resolve_vars)
 
             spec = ServerSpec(**raw)
             if spec.prefix is None:
